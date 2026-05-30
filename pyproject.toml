@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "metamem"
+version = "0.1.0"
+description = "Unified lifelong memory for LLM agents — typed stores, evolution from task results, MCP integration"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [
+    {name = "SimpleMem Team"},
+]
+keywords = ["llm", "memory", "agent", "mcp", "evolution"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "lancedb>=0.6.0",
+    "pyarrow>=14.0",
+    "numpy>=1.24",
+    "sentence-transformers>=2.2",
+    "rank-bm25>=0.2.2",
+    "openai>=1.0",
+    "pyyaml>=6.0",
+    "click>=8.0",
+    "uvicorn>=0.27",
+    "fastapi>=0.109",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+benchmark = [
+    "rouge-score>=0.1.2",
+    "nltk>=3.8",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.2",
+]
+
+[project.scripts]
+metamem = "metamem.cli:main"
+
+[project.entry-points."mcp.servers"]
+metamem = "metamem.mcp_server:serve"
+
+[tool.hatch.build.targets.wheel]
+packages = ["metamem"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
