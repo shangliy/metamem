@@ -415,6 +415,45 @@ def hook_session_end():
 
 
 @main.command()
+def usage():
+    """Show token usage tracked from Claude Code sessions."""
+    from . import usage as _usage
+    data_dir = os.environ.get("METAMEM_DATA_DIR", os.path.expanduser("~/.metamem"))
+    records = _usage.load_usage(data_dir)
+    if not records:
+        click.echo("No token usage recorded yet.")
+        click.echo("  Usage is captured automatically by the Stop hook during Claude Code sessions.")
+        return
+
+    summary = _usage.summarize(records)
+    t = summary["totals"]
+    click.echo("Token Usage")
+    click.echo("=" * 40)
+    click.echo(f"  Turns tracked:     {summary['turns']}")
+    click.echo(f"  Input tokens:      {t['input_tokens']:,}")
+    click.echo(f"  Output tokens:     {t['output_tokens']:,}")
+    click.echo(f"  Cache read:        {t['cache_read_input_tokens']:,}")
+    click.echo(f"  Cache creation:    {t['cache_creation_input_tokens']:,}")
+    click.echo(f"  Cache hit ratio:   {summary['cache_hit_ratio']:.1%}")
+    click.echo()
+    click.echo("  By project:")
+    for proj, stats in summary["by_project"].items():
+        click.echo(f"    {proj:20s}: {stats['turns']:4d} turns, "
+                   f"in={stats['input_tokens']:,} out={stats['output_tokens']:,}")
+
+
+@main.command()
+@click.option("--host", default="127.0.0.1", help="Bind host (default: 127.0.0.1, local-only)")
+@click.option("--port", default=8765, help="Bind port (default: 8765)")
+def dashboard(host: str, port: int):
+    """Launch a local web dashboard to browse memories + token usage."""
+    from .dashboard import serve_dashboard
+    click.echo(f"  🧠 MetaMem dashboard → http://{host}:{port}")
+    click.echo("  (Ctrl+C to stop)")
+    serve_dashboard(host=host, port=port)
+
+
+@main.command()
 @click.argument("benchmark", type=click.Choice(["locomo", "membench", "longmemeval"]))
 @click.option("--data", default=None, help="Data path")
 @click.option("--max-rounds", default=5, help="Max evolution rounds")

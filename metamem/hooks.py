@@ -207,7 +207,21 @@ def handle_stop(payload: dict) -> dict:
         f"User: {user_text}\n\nAssistant: {assistant_text}",
         metadata={"source": "claude-code-hook", "summary": summary},
     )
-    return {"systemMessage": f"💾 MetaMem: turn saved ({len(sm.session.events)} events)"}
+
+    # Track per-turn token usage in a separate ledger (never blocks the hook).
+    msg = f"💾 MetaMem: turn saved ({len(sm.session.events)} events)"
+    try:
+        from . import usage as _usage
+        token_usage = _usage.extract_usage(lines)
+        if token_usage:
+            data_dir = os.environ.get("METAMEM_DATA_DIR", os.path.expanduser("~/.metamem"))
+            record = _usage.build_record(sm.session_id, sm.config.project, token_usage)
+            _usage.record_usage(data_dir, record)
+            msg += f" | tokens in={token_usage['input_tokens']} out={token_usage['output_tokens']}"
+    except Exception:
+        pass
+
+    return {"systemMessage": msg}
 
 
 def handle_session_end(payload: dict) -> dict:

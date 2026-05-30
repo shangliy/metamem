@@ -87,7 +87,26 @@ metamem search "docker rate limit"
 
 # View stats
 metamem stats
+
+# View token usage tracked from Claude Code sessions
+metamem usage
+
+# Launch the local dashboard (memories + token usage)
+metamem dashboard            # → http://127.0.0.1:8765
 ```
+
+### Dashboard
+
+`metamem dashboard` launches a local, read-only web UI (FastAPI, no build step,
+binds to `127.0.0.1` only) to browse:
+
+- **Memories** — by type, summary, and confidence, filterable per project
+- **Token usage** — totals, cache-hit ratio, and per-project breakdown, sourced
+  from the separate usage ledger at `~/.metamem/usage/token_usage.jsonl`
+
+Token usage is captured automatically by the `Stop` hook (from each turn's
+`message.usage`) and stored separately from the memory store, so it's easy to
+analyze cost/benefit over time.
 
 ---
 
