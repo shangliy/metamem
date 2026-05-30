@@ -32,6 +32,7 @@ import logging
 import os
 import subprocess
 import time
+import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -99,6 +100,7 @@ class SessionConfig:
     auto_inject_context: bool = True
     context_budget_tokens: int = 3000
     topic_segmentation: bool = True
+    session_id: str = ""  # Pin to a caller-supplied id (e.g. Claude Code session)
 
 
 class SessionManager:
@@ -127,8 +129,9 @@ class SessionManager:
         self.sessions_dir.mkdir(exist_ok=True)
         (self.project_dir / "embeddings").mkdir(exist_ok=True)
 
-        # Current session
-        self.session_id = time.strftime("%Y%m%d_%H%M%S")
+        # Current session — reuse a pinned id (e.g. Claude Code session) if given,
+        # so multiple hook invocations append to the SAME session folder.
+        self.session_id = self.config.session_id or time.strftime("%Y%m%d_%H%M%S")
         self.session_dir = self.sessions_dir / self.session_id
         self.session_dir.mkdir(exist_ok=True)
         (self.session_dir / "topics").mkdir(exist_ok=True)
@@ -138,6 +141,8 @@ class SessionManager:
             session_id=self.session_id,
             project=self.config.project,
         )
+        # Reload any events already captured for this session id (hook re-attach).
+        self._reload_events()
         self._events_file = open(self.session_dir / "events.jsonl", "a")
 
         # Project-scoped memory store
@@ -194,6 +199,32 @@ class SessionManager:
         }
         self._events_file.write(json.dumps(record) + "\n")
         self._events_file.flush()
+
+    def _reload_events(self):
+        """Load events already persisted for this session id into memory.
+
+        Lets multiple hook invocations (separate processes) for the same Claude
+        session see prior events without rewriting the JSONL file.
+        """
+        events_file = self.session_dir / "events.jsonl"
+        if not events_file.exists():
+            return
+        try:
+            for line in events_file.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                rec = json.loads(line)
+                self.session.events.append(Event(
+                    event_id=rec.get("id", "") or str(uuid.uuid4())[:8],
+                    type=rec.get("type", "message"),
+                    content=rec.get("content", ""),
+                    timestamp=rec.get("timestamp", time.time()),
+                    metadata=rec.get("metadata", {}) or {},
+                ))
+        except (json.JSONDecodeError, OSError):
+            # Corrupt log line — skip reloading rather than crash the hook.
+            pass
 
     # ── Context Injection ──
 

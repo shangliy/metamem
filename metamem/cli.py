@@ -120,14 +120,64 @@ def _register_with_claude_cli(scope: str, data_dir: str) -> bool:
     return False
 
 
+def _register_hooks(settings_path: Path, data_dir: str) -> None:
+    """Add MetaMem lifecycle hooks to a Claude Code settings.json (additive merge).
+
+    Existing hooks for other tools are preserved; MetaMem entries are matched
+    and replaced by their command string so re-running install stays idempotent.
+    """
+    events = {
+        "SessionStart": ("session-start", 15),
+        "UserPromptSubmit": ("user-prompt-submit", 15),
+        "Stop": ("stop", 20),
+        "SessionEnd": ("session-end", 15),
+    }
+    settings = _safe_load_json(settings_path)
+    hooks = settings.setdefault("hooks", {})
+
+    for event, (sub, timeout) in events.items():
+        command = f"{sys.executable} -m metamem hook {sub}"
+        entry = {"hooks": [{"type": "command", "command": command, "timeout": timeout}]}
+
+        existing = hooks.get(event)
+        if not isinstance(existing, list):
+            hooks[event] = [entry]
+            continue
+
+        # Drop any prior MetaMem entry for this event, then append the fresh one.
+        filtered = [
+            grp for grp in existing
+            if not _is_metamem_hook_group(grp)
+        ]
+        filtered.append(entry)
+        hooks[event] = filtered
+
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(settings_path, "w") as f:
+        json.dump(settings, f, indent=2)
+
+
+def _is_metamem_hook_group(group: dict) -> bool:
+    """True if a hooks group contains a MetaMem hook command."""
+    if not isinstance(group, dict):
+        return False
+    for h in group.get("hooks", []):
+        if isinstance(h, dict) and "metamem hook" in str(h.get("command", "")):
+            return True
+    return False
+
+
 @main.command()
 @click.option("--project-dir", default=None, help="Project directory to add CLAUDE.md to (default: cwd)")
 @click.option("--project-only", is_flag=True, help="Only install in project dir, skip global")
-def install(project_dir: str | None, project_only: bool):
+@click.option("--no-hooks", is_flag=True, help="Skip Claude Code hooks (MCP tools only)")
+def install(project_dir: str | None, project_only: bool, no_hooks: bool):
     """Register MetaMem MCP server with Claude Code + inject CLAUDE.md instructions.
 
     Installs globally (~/.claude/.mcp.json) so it works in ALL projects.
     Also adds CLAUDE.md instructions to the current project directory.
+    By default also registers lifecycle hooks for automatic memory capture
+    (use --no-hooks to skip).
     """
     data_dir = os.path.expanduser("~/.metamem")
     mcp_entry = {
@@ -214,7 +264,17 @@ def install(project_dir: str | None, project_only: bool):
             f.write("\n" + CLAUDE_MD_MEMORY_SECTION)
         click.echo(f"✓ Updated global {global_claude_md}")
 
-    # ── 5. Verify server starts correctly ──
+    # ── 5. Register Claude Code hooks for automatic memory capture ──
+    if not no_hooks:
+        if project_only:
+            hooks_settings = target_dir / ".claude" / "settings.json"
+        else:
+            hooks_settings = claude_dir / "settings.json"
+        _register_hooks(hooks_settings, data_dir)
+        click.echo(f"✓ Lifecycle hooks registered in {hooks_settings}")
+        click.echo("  → Memory now captured automatically (SessionStart/UserPromptSubmit/Stop/SessionEnd)")
+
+    # ── 6. Verify server starts correctly ──
     click.echo()
     click.echo("  Verifying MCP server...")
     if _verify_server_starts():
@@ -232,11 +292,11 @@ def install(project_dir: str | None, project_only: bool):
     click.echo("    claude mcp list")
     click.echo("    → If MetaMem shows \"Pending approval\", launch `claude` and approve it.")
     click.echo()
-    click.echo("  What happens now:")
-    click.echo("    1. Claude sees CLAUDE.md → knows to use memory tools")
-    click.echo("    2. At session start → auto-calls mem_context (previous work)")
-    click.echo("    3. During work → searches/stores/tracks events")
-    click.echo("    4. After tasks → reports results (evolution feedback)")
+    click.echo("  What happens now (automatic via hooks):")
+    click.echo("    1. SessionStart      → prior project context injected")
+    click.echo("    2. UserPromptSubmit  → relevant memories searched + injected")
+    click.echo("    3. Stop              → each completed turn captured")
+    click.echo("    4. SessionEnd        → session finalized + summarized")
     click.echo()
     click.echo("  Memory tools:")
     click.echo("    • mem_context  — Load previous session context (auto at start)")
@@ -314,6 +374,44 @@ def serve():
     """Start MCP server (stdio transport)."""
     from .mcp_server import serve as _serve
     _serve()
+
+
+@main.group(hidden=True)
+def hook():
+    """Claude Code lifecycle hooks (invoked by Claude Code, not by users)."""
+    pass
+
+
+def _run_hook(event: str):
+    """Read stdin JSON, dispatch to the hook handler, print JSON to stdout."""
+    from .hooks import run_hook
+    stdin_text = sys.stdin.read() if not sys.stdin.isatty() else ""
+    result = run_hook(event, stdin_text)
+    click.echo(json.dumps(result))
+
+
+@hook.command("session-start")
+def hook_session_start():
+    """SessionStart hook — inject prior project context."""
+    _run_hook("session-start")
+
+
+@hook.command("user-prompt-submit")
+def hook_user_prompt_submit():
+    """UserPromptSubmit hook — search + inject relevant memories."""
+    _run_hook("user-prompt-submit")
+
+
+@hook.command("stop")
+def hook_stop():
+    """Stop hook — capture the completed turn."""
+    _run_hook("stop")
+
+
+@hook.command("session-end")
+def hook_session_end():
+    """SessionEnd hook — finalize + summarize the session."""
+    _run_hook("session-end")
 
 
 @main.command()

@@ -53,6 +53,26 @@ claude mcp list
 
 If MetaMem shows **"Pending approval"**, launch `claude` and approve it. Restart Claude Code to activate.
 
+### Automatic capture (hooks)
+
+By default, `metamem install` also registers **Claude Code lifecycle hooks** into
+`~/.claude/settings.json` (or `.claude/settings.json` with `--project-only`). Unlike
+the `CLAUDE.md` instructions — which the model may skip — hooks fire **deterministically**
+at each lifecycle event, so memory capture happens whether or not the model "remembers":
+
+| Event | What MetaMem does |
+|-------|-------------------|
+| `SessionStart` | Injects prior project context into the conversation |
+| `UserPromptSubmit` | Searches memory for the prompt and injects relevant hits |
+| `Stop` | Captures the completed turn as a session event |
+| `SessionEnd` | Finalizes + summarizes the session into project memory |
+
+Skip hooks (MCP tools only) with:
+
+```bash
+metamem install --no-hooks
+```
+
 ### Use from CLI
 
 ```bash
