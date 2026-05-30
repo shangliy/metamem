@@ -65,28 +65,19 @@ You have persistent project memory via MCP tools. **These are mandatory behavior
 @click.option("--global-only", is_flag=True, help="Only install globally, skip project CLAUDE.md")
 def install(claude_config: str | None, project_dir: str | None, global_only: bool):
     """Register MetaMem MCP server with Claude Code + inject CLAUDE.md instructions."""
-    # ── 1. Register MCP Server ──
-    if claude_config:
-        config_dir = Path(claude_config)
+    # ── 1. Register MCP Server via .mcp.json (project-level) ──
+    target_dir = Path(project_dir) if project_dir else Path.cwd()
+    mcp_json_path = target_dir / ".mcp.json"
+
+    # Load or create .mcp.json
+    if mcp_json_path.exists():
+        with open(mcp_json_path) as f:
+            mcp_config = json.load(f)
     else:
-        config_dir = Path.home() / ".claude"
+        mcp_config = {}
 
-    config_file = config_dir / "claude_desktop_config.json"
-    if not config_dir.exists():
-        config_dir.mkdir(parents=True, exist_ok=True)
-
-    # Load or create config
-    if config_file.exists():
-        with open(config_file) as f:
-            config = json.load(f)
-    else:
-        config = {}
-
-    if "mcpServers" not in config:
-        config["mcpServers"] = {}
-
-    # Add metamem server
-    config["mcpServers"]["metamem"] = {
+    # Add metamem server entry
+    mcp_config["metamem"] = {
         "command": sys.executable,
         "args": ["-m", "metamem.mcp_server"],
         "env": {
@@ -94,10 +85,28 @@ def install(claude_config: str | None, project_dir: str | None, global_only: boo
         },
     }
 
-    with open(config_file, "w") as f:
-        json.dump(config, f, indent=2)
+    with open(mcp_json_path, "w") as f:
+        json.dump(mcp_config, f, indent=2)
 
-    click.echo(f"✓ MCP server registered in {config_file}")
+    click.echo(f"✓ MCP server registered in {mcp_json_path}")
+
+    # Also update claude_desktop_config.json for Claude Desktop compatibility
+    if claude_config:
+        config_dir = Path(claude_config)
+    else:
+        config_dir = Path.home() / ".claude"
+    config_file = config_dir / "claude_desktop_config.json"
+    if config_dir.exists():
+        if config_file.exists():
+            with open(config_file) as f:
+                desktop_config = json.load(f)
+        else:
+            desktop_config = {}
+        if "mcpServers" not in desktop_config:
+            desktop_config["mcpServers"] = {}
+        desktop_config["mcpServers"]["metamem"] = mcp_config["metamem"]
+        with open(config_file, "w") as f:
+            json.dump(desktop_config, f, indent=2)
 
     # ── 2. Inject CLAUDE.md instructions ──
     if not global_only:
