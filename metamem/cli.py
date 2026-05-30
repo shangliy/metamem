@@ -60,24 +60,15 @@ You have persistent project memory via MCP tools. **These are mandatory behavior
 
 
 @main.command()
-@click.option("--claude-config", default=None, help="Path to Claude config directory")
 @click.option("--project-dir", default=None, help="Project directory to add CLAUDE.md to (default: cwd)")
-@click.option("--global-only", is_flag=True, help="Only install globally, skip project CLAUDE.md")
-def install(claude_config: str | None, project_dir: str | None, global_only: bool):
-    """Register MetaMem MCP server with Claude Code + inject CLAUDE.md instructions."""
-    # ── 1. Register MCP Server via .mcp.json (project-level) ──
-    target_dir = Path(project_dir) if project_dir else Path.cwd()
-    mcp_json_path = target_dir / ".mcp.json"
+@click.option("--project-only", is_flag=True, help="Only install in project dir, skip global")
+def install(project_dir: str | None, project_only: bool):
+    """Register MetaMem MCP server with Claude Code + inject CLAUDE.md instructions.
 
-    # Load or create .mcp.json
-    if mcp_json_path.exists():
-        with open(mcp_json_path) as f:
-            mcp_config = json.load(f)
-    else:
-        mcp_config = {}
-
-    # Add metamem server entry
-    mcp_config["metamem"] = {
+    Installs globally (~/.claude/.mcp.json) so it works in ALL projects.
+    Also adds CLAUDE.md instructions to the current project directory.
+    """
+    mcp_entry = {
         "command": sys.executable,
         "args": ["-m", "metamem.mcp_server"],
         "env": {
@@ -85,28 +76,51 @@ def install(claude_config: str | None, project_dir: str | None, global_only: boo
         },
     }
 
-    with open(mcp_json_path, "w") as f:
-        json.dump(mcp_config, f, indent=2)
+    # ── 1. Global MCP registration (~/.claude/.mcp.json) — works for all projects ──
+    if not project_only:
+        claude_dir = Path.home() / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        global_mcp = claude_dir / ".mcp.json"
 
-    click.echo(f"✓ MCP server registered in {mcp_json_path}")
+        if global_mcp.exists():
+            with open(global_mcp) as f:
+                global_config = json.load(f)
+        else:
+            global_config = {}
 
-    # Also update claude_desktop_config.json for Claude Desktop compatibility
-    if claude_config:
-        config_dir = Path(claude_config)
-    else:
-        config_dir = Path.home() / ".claude"
-    config_file = config_dir / "claude_desktop_config.json"
-    if config_dir.exists():
-        if config_file.exists():
-            with open(config_file) as f:
+        global_config["metamem"] = mcp_entry
+        with open(global_mcp, "w") as f:
+            json.dump(global_config, f, indent=2)
+
+        click.echo(f"✓ MCP server registered globally in {global_mcp}")
+        click.echo("  → MetaMem will be available in ALL projects (no per-project setup needed)")
+
+        # Also update claude_desktop_config.json for Claude Desktop app compatibility
+        desktop_config_file = claude_dir / "claude_desktop_config.json"
+        if desktop_config_file.exists():
+            with open(desktop_config_file) as f:
                 desktop_config = json.load(f)
         else:
             desktop_config = {}
         if "mcpServers" not in desktop_config:
             desktop_config["mcpServers"] = {}
-        desktop_config["mcpServers"]["metamem"] = mcp_config["metamem"]
-        with open(config_file, "w") as f:
+        desktop_config["mcpServers"]["metamem"] = mcp_entry
+        with open(desktop_config_file, "w") as f:
             json.dump(desktop_config, f, indent=2)
+
+    # ── 2. Project-level .mcp.json (optional, for project-specific overrides) ──
+    target_dir = Path(project_dir) if project_dir else Path.cwd()
+    if project_only:
+        mcp_json_path = target_dir / ".mcp.json"
+        if mcp_json_path.exists():
+            with open(mcp_json_path) as f:
+                proj_config = json.load(f)
+        else:
+            proj_config = {}
+        proj_config["metamem"] = mcp_entry
+        with open(mcp_json_path, "w") as f:
+            json.dump(proj_config, f, indent=2)
+        click.echo(f"✓ MCP server registered in {mcp_json_path}")
 
     # ── 2. Inject CLAUDE.md instructions ──
     if not global_only:
