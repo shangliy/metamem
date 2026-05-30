@@ -32,7 +32,26 @@ pip install -e .
 metamem install
 ```
 
-This adds MetaMem as an MCP server in `~/.claude/claude_desktop_config.json`. Restart Claude Code to activate.
+This registers MetaMem as an MCP server using Claude Code's native CLI
+(`claude mcp add metamem --scope user -- <python> -m metamem.mcp_server`). If the
+`claude` CLI isn't on your PATH, it falls back to writing `~/.claude/.mcp.json` and
+`~/.claude/claude_desktop_config.json` directly. It also injects MetaMem instructions
+into your project's `CLAUDE.md`.
+
+Install variants:
+
+```bash
+metamem install --project-only        # register only for the current project (scope: project)
+metamem install --project-dir /path   # write CLAUDE.md to a specific directory
+```
+
+Then verify and approve in Claude Code:
+
+```bash
+claude mcp list
+```
+
+If MetaMem shows **"Pending approval"**, launch `claude` and approve it. Restart Claude Code to activate.
 
 ### Use from CLI
 
