@@ -122,9 +122,8 @@ def install(project_dir: str | None, project_only: bool):
             json.dump(proj_config, f, indent=2)
         click.echo(f"✓ MCP server registered in {mcp_json_path}")
 
-    # ── 2. Inject CLAUDE.md instructions ──
-    if not global_only:
-        target_dir = Path(project_dir) if project_dir else Path.cwd()
+    # ── 3. Inject CLAUDE.md instructions ──
+    if not project_only:
         claude_md = target_dir / "CLAUDE.md"
 
         if claude_md.exists():
@@ -141,8 +140,9 @@ def install(project_dir: str | None, project_only: bool):
             claude_md.write_text(CLAUDE_MD_MEMORY_SECTION)
             click.echo(f"✓ Created {claude_md} with memory instructions")
 
-    # ── 3. Global CLAUDE.md (optional backup) ──
-    global_claude_md = config_dir / "CLAUDE.md"
+    # ── 4. Global CLAUDE.md (optional backup) ──
+    claude_dir = Path.home() / ".claude"
+    global_claude_md = claude_dir / "CLAUDE.md"
     if not global_claude_md.exists():
         global_claude_md.write_text(CLAUDE_MD_MEMORY_SECTION)
         click.echo(f"✓ Created global {global_claude_md}")
