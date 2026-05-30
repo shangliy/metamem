@@ -21,6 +21,7 @@ from metamem.models import (
 from metamem.store import MemoryStore
 from metamem.retriever import RetrievalEngine, RetrievalConfig
 from metamem.evolution import EvolutionEngine
+from metamem.session import SessionManager, detect_project
 
 __all__ = [
     "MemoryType",

@@ -25,6 +25,7 @@ from .models import (
     TaskResult,
 )
 from .retriever import RetrievalConfig, RetrievalEngine
+from .session import SessionManager, detect_project
 from .store import MemoryStore
 
 logger = logging.getLogger(__name__)
@@ -33,15 +34,24 @@ logger = logging.getLogger(__name__)
 _store: MemoryStore | None = None
 _retriever: RetrievalEngine | None = None
 _evolution: EvolutionEngine | None = None
+_session: SessionManager | None = None
 
 
 def _init():
-    """Initialize global memory system."""
-    global _store, _retriever, _evolution
+    """Initialize global memory system with project detection."""
+    global _store, _retriever, _evolution, _session
     if _store is not None:
         return
 
     data_dir = os.environ.get("METAMEM_DATA_DIR", os.path.expanduser("~/.metamem"))
+
+    # Detect project and use project-scoped store
+    project = os.environ.get("METAMEM_PROJECT", "")
+    cwd = os.environ.get("METAMEM_CWD", os.getcwd())
+    if not project:
+        project = detect_project(cwd)
+
+    _session = SessionManager.start(project=project, cwd=cwd, data_dir=data_dir)
 
     # Try to load embedder
     embedder = None
@@ -52,7 +62,9 @@ def _init():
     except ImportError:
         logger.warning("sentence-transformers not available — semantic search disabled")
 
-    _store = MemoryStore(data_dir=data_dir, embedder=embedder)
+    # Use project-scoped store from session manager
+    _store = _session.store
+    _store.embedder = embedder
     _retriever = RetrievalEngine(_store, RetrievalConfig())
     _evolution = EvolutionEngine(_store, EvolutionConfig())
 
@@ -233,9 +245,43 @@ def mem_stats() -> dict[str, Any]:
     """
     _init()
     return {
+        "project": _session.config.project,
+        "project_dir": str(_session.project_dir),
+        "session_id": _session.session_id,
         "store": _store.stats(),
         "evolution": _evolution.get_stats(),
     }
+
+
+def mem_context() -> dict[str, Any]:
+    """Get project context injection — previous work summary for session continuity.
+
+    Returns:
+        Context from previous sessions: instructions, last session summary,
+        project skills, warnings, and key facts.
+    """
+    _init()
+    context = _session.get_context_injection()
+    return {
+        "project": _session.config.project,
+        "context": context,
+        "sessions": _session.list_sessions(limit=5),
+    }
+
+
+def mem_event(event_type: str, content: str) -> dict[str, Any]:
+    """Record a session event for memory tracking.
+
+    Args:
+        event_type: "message" | "tool_call" | "tool_result" | "observation" | "error"
+        content: What happened
+
+    Returns:
+        Confirmation with event ID.
+    """
+    _init()
+    _session.add_event(event_type, content)
+    return {"recorded": True, "session_id": _session.session_id, "events_total": len(_session.session.events)}
 
 
 # ── MCP Server Protocol ──
@@ -338,6 +384,30 @@ TOOLS = [
             "properties": {},
         },
     },
+    {
+        "name": "mem_context",
+        "description": "Get project context from previous sessions. "
+                       "Call at session start to continue previous work seamlessly.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "mem_event",
+        "description": "Record a session event for memory tracking. "
+                       "Call to log important actions/observations during the session.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "event_type": {"type": "string",
+                               "enum": ["message", "tool_call", "tool_result", "observation", "error"],
+                               "description": "Type of event"},
+                "content": {"type": "string", "description": "What happened"},
+            },
+            "required": ["event_type", "content"],
+        },
+    },
 ]
 
 # Handler dispatch
@@ -349,6 +419,8 @@ _HANDLERS = {
     "mem_instruct": mem_instruct,
     "mem_feedback": mem_feedback,
     "mem_stats": mem_stats,
+    "mem_context": mem_context,
+    "mem_event": mem_event,
 }
 
 
