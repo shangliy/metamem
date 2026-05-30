@@ -26,11 +26,46 @@ def main():
     pass
 
 
+CLAUDE_MD_MEMORY_SECTION = """\
+
+## Memory (MetaMem)
+
+You have persistent project memory via MCP tools. **These are mandatory behaviors, not optional.**
+
+### At Session Start (ALWAYS do this first)
+- Call `mem_context` to load previous work context BEFORE responding to the first user message.
+- This gives you continuity from previous sessions (what was done, what's pending, warnings).
+
+### During Session
+- Call `mem_search` before starting tasks to check for relevant knowledge, procedures, or warnings.
+- Call `mem_event(event_type, content)` to record important observations, decisions, and task outcomes.
+- When you learn something new about the project, call `mem_store` to save it.
+
+### After Completing or Failing a Task
+- Call `mem_feedback(description, memories_used, status)` to report the outcome.
+  - "success" → memories that helped get confidence boost
+  - "failure" → memories that misled get corrected, failure case is created
+  - "partial" → caveats are added
+- This is how the memory system learns and improves. NEVER skip this step.
+
+### When User Says "Remember..." or States a Preference
+- Call `mem_instruct(rule, scope)` to save the rule/preference permanently.
+
+### Rules
+- ALWAYS call `mem_context` at session start — this is non-negotiable.
+- ALWAYS call `mem_search` before deployments, debugging, or infrastructure changes.
+- ALWAYS call `mem_feedback` after task completion — even for small tasks.
+- When you encounter an error, `mem_search` for similar past failures before debugging from scratch.
+"""
+
+
 @main.command()
 @click.option("--claude-config", default=None, help="Path to Claude config directory")
-def install(claude_config: str | None):
-    """Register MetaMem MCP server with Claude Code."""
-    # Find Claude config
+@click.option("--project-dir", default=None, help="Project directory to add CLAUDE.md to (default: cwd)")
+@click.option("--global-only", is_flag=True, help="Only install globally, skip project CLAUDE.md")
+def install(claude_config: str | None, project_dir: str | None, global_only: bool):
+    """Register MetaMem MCP server with Claude Code + inject CLAUDE.md instructions."""
+    # ── 1. Register MCP Server ──
     if claude_config:
         config_dir = Path(claude_config)
     else:
@@ -62,17 +97,54 @@ def install(claude_config: str | None):
     with open(config_file, "w") as f:
         json.dump(config, f, indent=2)
 
-    click.echo(f"✓ MetaMem MCP server registered in {config_file}")
-    click.echo("  Restart Claude Code to activate.")
+    click.echo(f"✓ MCP server registered in {config_file}")
+
+    # ── 2. Inject CLAUDE.md instructions ──
+    if not global_only:
+        target_dir = Path(project_dir) if project_dir else Path.cwd()
+        claude_md = target_dir / "CLAUDE.md"
+
+        if claude_md.exists():
+            existing = claude_md.read_text()
+            if "## Memory (MetaMem)" in existing:
+                click.echo(f"✓ CLAUDE.md already has MetaMem section ({claude_md})")
+            else:
+                # Append to existing CLAUDE.md
+                with open(claude_md, "a") as f:
+                    f.write("\n" + CLAUDE_MD_MEMORY_SECTION)
+                click.echo(f"✓ Appended memory instructions to {claude_md}")
+        else:
+            # Create new CLAUDE.md
+            claude_md.write_text(CLAUDE_MD_MEMORY_SECTION)
+            click.echo(f"✓ Created {claude_md} with memory instructions")
+
+    # ── 3. Global CLAUDE.md (optional backup) ──
+    global_claude_md = config_dir / "CLAUDE.md"
+    if not global_claude_md.exists():
+        global_claude_md.write_text(CLAUDE_MD_MEMORY_SECTION)
+        click.echo(f"✓ Created global {global_claude_md}")
+    elif "## Memory (MetaMem)" not in global_claude_md.read_text():
+        with open(global_claude_md, "a") as f:
+            f.write("\n" + CLAUDE_MD_MEMORY_SECTION)
+        click.echo(f"✓ Updated global {global_claude_md}")
+
     click.echo()
-    click.echo("  Memory tools available:")
-    click.echo("    • mem_search  — Search memory index")
-    click.echo("    • mem_timeline — Chronological context")
-    click.echo("    • mem_get     — Full memory details")
-    click.echo("    • mem_store   — Store a typed memory")
+    click.echo("  ✅ Installation complete! Restart Claude Code to activate.")
+    click.echo()
+    click.echo("  What happens now:")
+    click.echo("    1. Claude sees CLAUDE.md → knows to use memory tools")
+    click.echo("    2. At session start → auto-calls mem_context (previous work)")
+    click.echo("    3. During work → searches/stores/tracks events")
+    click.echo("    4. After tasks → reports results (evolution feedback)")
+    click.echo()
+    click.echo("  Memory tools:")
+    click.echo("    • mem_context  — Load previous session context (auto at start)")
+    click.echo("    • mem_search   — Search memory index")
+    click.echo("    • mem_get      — Full memory details")
+    click.echo("    • mem_store    — Store a typed memory")
     click.echo("    • mem_instruct — Save a preference")
-    click.echo("    • mem_feedback — Report task results")
-    click.echo("    • mem_stats   — System statistics")
+    click.echo("    • mem_feedback — Report task results for evolution")
+    click.echo("    • mem_event    — Track session events")
 
 
 @main.command()
