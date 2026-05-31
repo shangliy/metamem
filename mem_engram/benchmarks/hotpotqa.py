@@ -32,6 +32,7 @@ import numpy as np
 
 from ..models import MemoryType, MemoryUnit
 from ..retriever import RetrievalConfig, RetrievalEngine, IterativeRetrievalEngine, format_context
+from ..retriever_dci import CorpusStore, DCIRetriever, HybridDCIRetriever, rg_search
 from ..store import MemoryStore
 
 logger = logging.getLogger(__name__)
@@ -497,3 +498,209 @@ def run_hotpotqa(
 
     print(f"\nArtifacts: {results_dir}/")
     return result
+
+
+# ── DCI corpus builder ────────────────────────────────────────────────────────
+
+def _build_sample_corpus(sample: HotpotSample, tmp_root: str) -> tuple[CorpusStore, dict[str, str]]:
+    """Store the 10 paragraphs as raw text files for rg-based DCI search."""
+    corpus_dir = tempfile.mkdtemp(dir=tmp_root, prefix="dci_hpqa_")
+    cs = CorpusStore(corpus_dir)
+    fname_to_title: dict[str, str] = {}
+    for para in sample.paragraphs:
+        # Include title in the file so rg can match on entity names
+        content = f"{para['title']}\n\n{para['text']}"
+        fname = cs.add(para["title"], content, {"title": para["title"]})
+        fname_to_title[fname] = para["title"]
+    return cs, fname_to_title
+
+
+# ── 3-way DCI benchmark ───────────────────────────────────────────────────────
+
+def run_dci_comparison(
+    n_samples: int = 50,
+    no_embeddings: bool = False,
+    llm_call: Callable | None = None,
+):
+    """Run 3-way comparison on HotpotQA:
+      A) Mem-Engram RRF+embedding (baseline, best round config)
+      B) Pure DCI (rg only, no embeddings)
+      C) Hybrid DCI (embedding narrows to top-15, DCI refines)
+
+    Same LLM, same 50 questions. Reports F1, Recall, latency, and LLM calls.
+    """
+    import anthropic as _anthropic
+
+    logging.basicConfig(level=logging.WARNING)
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY not set")
+
+    _model = os.environ.get("LLM_MODEL", "claude-haiku-4-5-20251001")
+    _client = _anthropic.Anthropic()
+
+    def _llm(messages, max_tokens=512, temperature=0.0):
+        system, user_msgs = "", []
+        for m in messages:
+            if m.get("role") == "system":
+                system = m["content"]
+            else:
+                user_msgs.append({"role": m["role"], "content": m["content"]})
+        if not user_msgs:
+            return ""
+        kw = dict(model=_model, max_tokens=min(max_tokens, 4096), messages=user_msgs)
+        if system:
+            kw["system"] = system
+        for attempt in range(3):
+            try:
+                r = _client.messages.create(**kw)
+                return (r.content[0].text or "").strip()
+            except Exception as e:
+                if attempt < 2:
+                    time.sleep(2 * (attempt + 1))
+                else:
+                    return ""
+        return ""
+
+    llm_call = llm_call or _llm
+
+    print("=" * 70)
+    print(f"DCI × Mem-Engram  ·  HotpotQA  ·  n={n_samples}  ·  {_model}")
+    print("=" * 70)
+
+    # Embedder for methods that use it
+    embedder = None
+    if not no_embeddings:
+        try:
+            from sentence_transformers import SentenceTransformer
+            embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            print("Embedder: all-MiniLM-L6-v2")
+        except Exception as e:
+            print(f"Embedder unavailable: {e}")
+
+    samples = load_hotpotqa(n_samples=n_samples)
+    type_dist = {s.qtype: type_dist.get(s.qtype, 0) + 1
+                 for s in samples for type_dist in [{}]}
+    type_dist = {}
+    for s in samples:
+        type_dist[s.qtype] = type_dist.get(s.qtype, 0) + 1
+    print(f"Loaded {len(samples)} examples: {type_dist}")
+
+    ret_cfg = RetrievalConfig(
+        semantic_top_k=5, keyword_top_k=5, max_context=5, fusion_mode="rrf",
+        enable_intent_routing=False, enable_entity_graph=False,
+        confidence_boost_weight=0.0, enable_result_feedback=False,
+    )
+    tmp_root = tempfile.mkdtemp(prefix="mem_engram_dci_")
+    results_dir = f"benchmark_results/dci_comparison/{time.strftime('%Y%m%d_%H%M%S')}"
+    os.makedirs(results_dir, exist_ok=True)
+
+    systems = {
+        "rrf_embedding": {"rows": [], "label": "A) RRF+Embedding (Mem-Engram)"},
+        "dci_pure":      {"rows": [], "label": "B) Pure DCI (rg only)"},
+        "dci_hybrid":    {"rows": [], "label": "C) Hybrid DCI (embedding→DCI)"},
+    }
+
+    for idx, sample in enumerate(samples):
+        # ── A) RRF+Embedding ──────────────────────────────────────────────────
+        store_a, id_to_title_a = _build_sample_store(sample, embedder, tmp_root)
+        t0 = time.time()
+        retriever_a = RetrievalEngine(store_a, ret_cfg)
+        q_emb = embedder.encode(sample.question) if embedder else None
+        retrieved_a = retriever_a.search(sample.question, ret_cfg, q_emb)
+        context_a = format_context(retrieved_a, max_tokens=1500)
+        pred_a = _answer(sample.question, context_a, llm_call)
+        lat_a = time.time() - t0
+        titles_a = [id_to_title_a.get(rm.memory.id, "") for rm in retrieved_a]
+        store_a.close()
+        systems["rrf_embedding"]["rows"].append({
+            "question": sample.question, "answer": sample.answer,
+            "prediction": pred_a, "f1": token_f1(pred_a, sample.answer),
+            "recall": retrieval_recall(titles_a, sample.supporting_titles),
+            "latency": lat_a, "llm_calls": 1, "qtype": sample.qtype,
+        })
+
+        # ── B) Pure DCI ───────────────────────────────────────────────────────
+        cs_b, fname_to_title_b = _build_sample_corpus(sample, tmp_root)
+        t0 = time.time()
+        dci_b = DCIRetriever(llm_call, cs_b, max_searches=4)
+        context_b, doc_ids_b = dci_b.retrieve_as_context(sample.question)
+        pred_b = _answer(sample.question, context_b, llm_call)
+        lat_b = time.time() - t0
+        # Map doc_ids (titles used as ids) to title for recall
+        titles_b = [cs_b.get_meta(f).get("id", "") for f in dci_b.retrieve(sample.question).relevant_files
+                    ] if False else doc_ids_b  # doc_ids_b are already titles
+        n_searches_b = 0  # tracked inside DCIRetriever.retrieve()
+        systems["dci_pure"]["rows"].append({
+            "question": sample.question, "answer": sample.answer,
+            "prediction": pred_b, "f1": token_f1(pred_b, sample.answer),
+            "recall": retrieval_recall(doc_ids_b, sample.supporting_titles),
+            "latency": lat_b, "llm_calls": 2, "qtype": sample.qtype,
+        })
+
+        # ── C) Hybrid DCI ─────────────────────────────────────────────────────
+        store_c, id_to_title_c = _build_sample_store(sample, embedder, tmp_root)
+        t0 = time.time()
+        hybrid = HybridDCIRetriever(llm_call, embedder, store_c, ret_cfg,
+                                    dci_max_searches=2, pre_filter_k=15)
+        context_c, doc_ids_c = hybrid.retrieve_as_context(sample.question, ret_cfg)
+        pred_c = _answer(sample.question, context_c, llm_call)
+        lat_c = time.time() - t0
+        titles_c = [id_to_title_c.get(did, did) for did in doc_ids_c]
+        store_c.close()
+        systems["dci_hybrid"]["rows"].append({
+            "question": sample.question, "answer": sample.answer,
+            "prediction": pred_c, "f1": token_f1(pred_c, sample.answer),
+            "recall": retrieval_recall(titles_c, sample.supporting_titles),
+            "latency": lat_c, "llm_calls": 2, "qtype": sample.qtype,
+        })
+
+        if (idx + 1) % 10 == 0:
+            for k, sys in systems.items():
+                rows = sys["rows"]
+                avg_f1 = sum(r["f1"] for r in rows) / len(rows)
+                print(f"  [{idx+1}/{n_samples}] {k:15s} avg_f1={avg_f1:.3f}")
+            print()
+
+    # ── Report ────────────────────────────────────────────────────────────────
+    print(f"\n{'=' * 70}")
+    print("3-WAY RESULTS")
+    print("=" * 70)
+    header = f"{'System':<35} {'F1':>7} {'Recall':>8} {'Lat(s)':>7}"
+    print(header)
+    print("-" * 60)
+
+    all_results = {}
+    for key, sys in systems.items():
+        rows = sys["rows"]
+        n = len(rows)
+        avg_f1 = sum(r["f1"] for r in rows) / max(n, 1)
+        avg_rec = sum(r["recall"] for r in rows) / max(n, 1)
+        avg_lat = sum(r["latency"] for r in rows) / max(n, 1)
+
+        by_type: dict[str, dict] = {}
+        for r in rows:
+            b = by_type.setdefault(r["qtype"], {"f1": 0.0, "recall": 0.0, "n": 0})
+            b["f1"] += r["f1"]; b["recall"] += r["recall"]; b["n"] += 1
+        for b in by_type.values():
+            b["f1"] = round(b["f1"] / b["n"], 4)
+            b["recall"] = round(b["recall"] / b["n"], 4)
+
+        print(f"{sys['label']:<35} {avg_f1:>7.4f} {avg_rec:>8.4f} {avg_lat:>7.2f}s")
+        all_results[key] = {"f1": round(avg_f1, 4), "recall": round(avg_rec, 4),
+                             "latency": round(avg_lat, 2), "by_type": by_type}
+
+    print("\nBy question type:")
+    for qtype in ["bridge", "comparison"]:
+        print(f"  {qtype}:")
+        for key, sys in systems.items():
+            b = all_results[key]["by_type"].get(qtype, {})
+            if b:
+                label = sys["label"][:25]
+                print(f"    {label:<25} F1={b['f1']:.4f}  Recall={b['recall']:.4f}")
+
+    with open(f"{results_dir}/dci_comparison.json", "w") as f:
+        json.dump({"n_samples": n_samples, "model": _model, "results": all_results}, f, indent=2)
+    print(f"\nArtifacts: {results_dir}/")
+    return all_results
