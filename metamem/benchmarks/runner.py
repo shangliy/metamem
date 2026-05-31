@@ -1,11 +1,16 @@
-"""Benchmark runner — EvolveMem-compatible evaluation with MetaMem retrieval.
+"""Benchmark runner — MetaMem retrieval evaluated with EvolveMem's benchmark infrastructure.
 
-Plugs MetaMem's typed retrieval into the same benchmark protocol as EvolveMem:
-- LoCoMo (long-context conversational memory)
-- MemBench (multiple-choice agent memory)
-- LongMemEval (cross-session memory)
+Borrows from EvolveMem:
+- LoCoMoAdapter: data loading, per-category answer prompts, token_f1 scoring
+- BenchmarkSample / BenchmarkAdapter protocol
+- Evolution diagnosis loop structure
 
-Supports evolution loop: Evaluate → Diagnose → Adjust config → Repeat
+MetaMem's own stack:
+- MemoryExtractor: LLM-driven typed memory extraction from conversation turns
+- MemoryStore: SQLite + embeddings typed store
+- RetrievalEngine: intent-aware multi-view retrieval (semantic + FTS + entity graph)
+
+LLM: Anthropic (claude-haiku for extraction/eval, override via LLM_MODEL env var)
 """
 
 from __future__ import annotations
@@ -14,87 +19,58 @@ import json
 import logging
 import os
 import re
+import sys
+import tempfile
 import time
 from dataclasses import asdict, dataclass, field
 from typing import Any, Callable
 
 import numpy as np
-import yaml
-from openai import OpenAI
 
+# ── EvolveMem adapters (borrowed) — lazy import so path can be set at runtime ─
+def _import_evolvemem():
+    _EVOLVEMEM = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "../../../EvolveMem")
+    )
+    if _EVOLVEMEM not in sys.path:
+        sys.path.insert(0, _EVOLVEMEM)
+    from evolvemem.benchmarks import LoCoMoAdapter, BenchmarkSample  # noqa
+    from evolvemem.benchmarks.base import token_f1                   # noqa
+    return LoCoMoAdapter, BenchmarkSample, token_f1
+
+# ── MetaMem stack ─────────────────────────────────────────────────────────────
 from ..extractor import MemoryExtractor
 from ..models import MemoryType, MemoryUnit
-from ..retriever import RetrievalConfig, RetrievalEngine, RetrievedMemory, format_context
+from ..retriever import RetrievalConfig, RetrievalEngine, format_context
 from ..store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
 
-# ── Scoring ──
+# ── LLM (Anthropic) ──────────────────────────────────────────────────────────
 
-def _tokenize(s: str) -> list[str]:
-    """Lowercase, remove punctuation, split."""
-    return re.sub(r'[^a-z0-9\s]', ' ', str(s).lower()).split()
+def _make_llm_call(model: str | None = None) -> Callable:
+    import anthropic
+    _model = model or os.environ.get("LLM_MODEL", "claude-haiku-4-5-20251001")
+    client = anthropic.Anthropic()
 
-
-def token_f1(prediction: str, reference: str) -> float:
-    """Token-level F1 between prediction and reference."""
-    p, r = _tokenize(prediction), _tokenize(reference)
-    if not p or not r:
-        return 0.0
-    rc = list(r)
-    c = 0
-    for t in p:
-        if t in rc:
-            c += 1
-            rc.remove(t)
-    if c == 0:
-        return 0.0
-    pr = c / len(p)
-    rec = c / len(r)
-    return 2 * pr * rec / (pr + rec)
-
-
-def mcq_accuracy(prediction: str, ground_truth: str) -> float:
-    """Multiple-choice accuracy."""
-    gt = ground_truth.strip().upper()
-    pred = prediction.strip().upper()
-    if not gt or not pred:
-        return 0.0
-    m = re.search(r'(?:^|[^A-Za-z])([A-Z])(?:[^A-Za-z]|$)', pred)
-    if m and m.group(1) == gt:
-        return 1.0
-    return 0.0
-
-
-# ── LLM Setup ──
-
-def _load_llm() -> Callable:
-    """Create an LLM call function from env."""
-    api_key = os.environ.get("OPENAI_API_KEY", "")
-    base_url = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1")
-    model = os.environ.get("LLM_MODEL", "gpt-4o")
-
-    if not api_key:
-        # Try yaml file
-        if os.path.exists("openai_key.yaml"):
-            with open("openai_key.yaml") as f:
-                cfg = yaml.safe_load(f)
-            api_key = cfg.get("api_key", "")
-            base_url = cfg.get("base_url", base_url)
-            model = cfg.get("model", model)
-
-    client = OpenAI(base_url=base_url, api_key=api_key)
-
-    def llm_call(messages, max_tokens: int = 4096, temperature: float = 0.1):
+    def llm_call(messages, max_tokens: int = 1024, temperature: float = 0.1):
+        system, user_messages = "", []
+        for m in messages:
+            if m.get("role") == "system":
+                system = m.get("content", "")
+            else:
+                user_messages.append({"role": m["role"], "content": m["content"]})
+        if not user_messages:
+            return ""
+        kwargs: dict = dict(model=_model, max_tokens=min(max_tokens, 4096),
+                            messages=user_messages)
+        if system:
+            kwargs["system"] = system
         for attempt in range(3):
             try:
-                r = client.chat.completions.create(
-                    model=model, messages=messages,
-                    max_completion_tokens=max_tokens,
-                    temperature=temperature,
-                )
-                return (r.choices[0].message.content or "").strip()
+                r = client.messages.create(**kwargs)
+                return (r.content[0].text or "").strip()
             except Exception as e:
                 if attempt < 2:
                     time.sleep(2 * (attempt + 1))
@@ -106,392 +82,305 @@ def _load_llm() -> Callable:
     return llm_call
 
 
-# ── Data Loading ──
+# ── Scoring ───────────────────────────────────────────────────────────────────
 
-@dataclass
-class BenchmarkSample:
-    """One evaluation unit."""
-    sample_id: str
-    sessions: list[tuple[str, str, list[dict]]]  # (session_id, date, turns)
-    qa_pairs: list[dict]  # {question, answer, category, ...}
-
-
-def _load_locomo(path: str, sample_index: int = 0) -> list[BenchmarkSample]:
-    """Load LoCoMo benchmark data."""
-    with open(path) as f:
-        data = json.load(f)
-
-    if isinstance(data, list):
-        items = [data[sample_index]] if sample_index < len(data) else data[:1]
-    else:
-        items = [data]
-
-    samples = []
-    for i, item in enumerate(items):
-        sessions = []
-        # LoCoMo format: conversation turns
-        if "conversation" in item:
-            turns = item["conversation"]
-            sessions.append((f"locomo_{i}", "", turns))
-        elif "sessions" in item:
-            for j, sess in enumerate(item["sessions"]):
-                turns = sess.get("turns", sess.get("conversation", []))
-                sessions.append((f"locomo_{i}_s{j}", sess.get("date", ""), turns))
-
-        qa_pairs = item.get("qa_pairs", item.get("questions", []))
-        samples.append(BenchmarkSample(
-            sample_id=f"locomo_{i}",
-            sessions=sessions,
-            qa_pairs=qa_pairs,
-        ))
-
-    return samples
+def _parse_answer(raw: str) -> str:
+    """Extract answer field from JSON response, fallback to raw."""
+    try:
+        m = re.search(r'"answer"\s*:\s*"([^"]*)"', raw)
+        if m:
+            return m.group(1).strip()
+        obj = json.loads(raw)
+        return str(obj.get("answer", raw)).strip()
+    except Exception:
+        return raw.strip()
 
 
-def _load_membench(path: str) -> list[BenchmarkSample]:
-    """Load MemBench data."""
-    samples = []
-    if os.path.isdir(path):
-        for fname in os.listdir(path):
-            if fname.endswith(".json"):
-                with open(os.path.join(path, fname)) as f:
-                    data = json.load(f)
-                if isinstance(data, list):
-                    for item in data[:20]:  # Limit for speed
-                        sessions = [(item.get("tid", ""), "", item.get("turns", []))]
-                        qa_pairs = item.get("questions", [])
-                        samples.append(BenchmarkSample(
-                            sample_id=item.get("tid", fname),
-                            sessions=sessions,
-                            qa_pairs=qa_pairs,
-                        ))
-    return samples
-
-
-# ── Evolution Loop ──
+# ── Evolution ─────────────────────────────────────────────────────────────────
 
 @dataclass
 class RoundResult:
-    """Result of one evaluation round."""
     round_id: int
-    primary_metric: float
-    all_metrics: dict[str, float] = field(default_factory=dict)
-    total_questions: int = 0
+    f1: float
+    by_category: dict[str, float] = field(default_factory=dict)
+    total: int = 0
     correct: int = 0
     config: dict = field(default_factory=dict)
     improvements: list[str] = field(default_factory=list)
+    memory_count: int = 0
 
 
 @dataclass
 class EvolutionResult:
-    """Full evolution run result."""
     rounds: list[RoundResult] = field(default_factory=list)
     best_round: int = 0
-    best_score: float = 0.0
+    best_f1: float = 0.0
     final_config: dict = field(default_factory=dict)
 
     def trajectory(self) -> str:
-        """Pretty-print evolution trajectory."""
-        lines = ["Round | Primary Metric | Config Changes"]
+        lines = ["Round |   F1   | Memories | Config changes"]
         lines.append("-" * 60)
         for r in self.rounds:
-            changes = ", ".join(r.improvements[:3]) if r.improvements else "initial"
-            lines.append(f"  {r.round_id:2d}  |    {r.primary_metric:.4f}    | {changes}")
-        lines.append(f"\nBest: Round {self.best_round} = {self.best_score:.4f}")
+            changes = ", ".join(r.improvements[:3]) if r.improvements else "—"
+            lines.append(f"  {r.round_id:2d}  | {r.f1:.4f} |   {r.memory_count:4d}   | {changes}")
+        lines.append(f"\nBest: Round {self.best_round} → F1={self.best_f1:.4f}")
         return "\n".join(lines)
 
 
-def _diagnose_failures(
+def _diagnose_and_suggest(
     results: list[dict],
     config: RetrievalConfig,
     llm_call: Callable,
 ) -> list[str]:
-    """Use LLM to diagnose failure patterns and propose config changes."""
+    """Use LLM to diagnose failures and propose RetrievalConfig changes."""
     failures = [r for r in results if r.get("score", 0) < 0.3]
     if not failures:
         return []
 
-    failure_summary = "\n".join([
-        f"Q: {f['question'][:80]} | Expected: {f['reference'][:40]} | Got: {f['prediction'][:40]}"
-        for f in failures[:10]
-    ])
-
-    prompt = f"""Analyze these QA failures from a memory retrieval system and suggest configuration improvements.
-
-Current config:
-- semantic_top_k: {config.semantic_top_k}
-- keyword_top_k: {config.keyword_top_k}
-- fusion_mode: {config.fusion_mode}
-- enable_intent_routing: {config.enable_intent_routing}
-- confidence_boost_weight: {config.confidence_boost_weight}
-- weight_procedural: {config.weight_procedural}
-- weight_failure: {config.weight_failure}
-
-Failures:
-{failure_summary}
-
-Suggest 1-3 config changes as JSON: [{{"field": "...", "value": ...}}]
-Only suggest fields from the config above."""
-
-    messages = [{"role": "user", "content": prompt}]
-    response = llm_call(messages, max_tokens=512)
-
-    # Parse suggestions
+    summary = "\n".join(
+        f"Cat{r.get('category',0)} Q: {r['question'][:80]} | Gold: {r['reference'][:30]} | Got: {r['prediction'][:30]}"
+        for r in failures[:10]
+    )
+    prompt = (
+        f"Analyze these memory-QA failures and suggest config changes.\n\n"
+        f"Current config: fusion={config.fusion_mode}, sem_k={config.semantic_top_k}, "
+        f"kw_k={config.keyword_top_k}, intent={config.enable_intent_routing}, "
+        f"conf_boost={config.confidence_boost_weight}\n\n"
+        f"Failures:\n{summary}\n\n"
+        "Suggest 1-3 changes as JSON array: [{\"field\": \"...\", \"value\": ...}]\n"
+        "Valid fields: semantic_top_k, keyword_top_k, fusion_mode, enable_intent_routing, "
+        "confidence_boost_weight, weight_episodic, weight_semantic_type, weight_procedural"
+    )
+    raw = llm_call([{"role": "user", "content": prompt}], max_tokens=256)
     suggestions = []
     try:
-        match = re.search(r'\[.*\]', response, re.DOTALL)
-        if match:
-            items = json.loads(match.group())
-            for item in items:
+        m = re.search(r'\[.*?\]', raw, re.DOTALL)
+        if m:
+            for item in json.loads(m.group()):
                 if "field" in item and "value" in item:
                     suggestions.append(f"{item['field']}={item['value']}")
-    except (json.JSONDecodeError, KeyError):
+    except Exception:
         pass
-
     return suggestions
 
 
 def _apply_suggestions(config: RetrievalConfig, suggestions: list[str]) -> RetrievalConfig:
-    """Apply diagnosed suggestions to config."""
     import copy
-    new_config = copy.deepcopy(config)
-
-    for suggestion in suggestions:
+    cfg = copy.deepcopy(config)
+    for s in suggestions:
         try:
-            field_name, value_str = suggestion.split("=", 1)
-            field_name = field_name.strip()
-            if hasattr(new_config, field_name):
-                current = getattr(new_config, field_name)
-                if isinstance(current, bool):
-                    setattr(new_config, field_name, value_str.strip().lower() == "true")
-                elif isinstance(current, int):
-                    setattr(new_config, field_name, int(float(value_str)))
-                elif isinstance(current, float):
-                    setattr(new_config, field_name, float(value_str))
-                else:
-                    setattr(new_config, field_name, value_str.strip().strip('"\''))
-        except (ValueError, AttributeError):
+            k, v = s.split("=", 1)
+            k = k.strip()
+            if not hasattr(cfg, k):
+                continue
+            cur = getattr(cfg, k)
+            if isinstance(cur, bool):
+                setattr(cfg, k, v.strip().lower() == "true")
+            elif isinstance(cur, int):
+                setattr(cfg, k, int(float(v)))
+            elif isinstance(cur, float):
+                setattr(cfg, k, float(v))
+            else:
+                setattr(cfg, k, v.strip().strip("'\""))
+        except Exception:
             continue
+    return cfg
 
-    return new_config
 
-
-# ── Main Runner ──
+# ── Main runner ───────────────────────────────────────────────────────────────
 
 def run_benchmark(
     benchmark_name: str = "locomo",
     data_path: str | None = None,
-    max_rounds: int = 5,
+    max_rounds: int = 3,
     initial: str = "weak",
-    sample_index: int = 0,
+    sample_indices: list[int] | None = None,
+    max_qa: int | None = None,
+    no_embeddings: bool = False,
 ):
-    """Run a benchmark with MetaMem's typed retrieval + evolution.
+    logging.basicConfig(level=logging.WARNING,
+                        format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
-    Args:
-        benchmark_name: "locomo" | "membench" | "longmemeval"
-        data_path: Path to benchmark data
-        max_rounds: Max evolution rounds
-        initial: "weak" or "strong" starting config
-        sample_index: Sample index for LoCoMo
-    """
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    print("=" * 64)
+    print(f"MetaMem Benchmark  ·  {benchmark_name}  ·  initial={initial}")
+    print("=" * 64)
 
-    print(f"{'=' * 60}")
-    print(f"MetaMem Benchmark: {benchmark_name}")
-    print(f"{'=' * 60}")
+    llm_call = _make_llm_call()
+    print(f"LLM: {os.environ.get('LLM_MODEL', 'claude-haiku-4-5-20251001')}")
 
-    # Load LLM
-    llm_call = _load_llm()
-
-    # Load embedder
+    # Embedder
     embedder = None
-    try:
-        from sentence_transformers import SentenceTransformer
-        embedder = SentenceTransformer("all-MiniLM-L6-v2")
-        print("Embedder: all-MiniLM-L6-v2")
-    except ImportError:
-        print("No embedder available — semantic search disabled")
+    if not no_embeddings:
+        try:
+            from sentence_transformers import SentenceTransformer
+            embedder = SentenceTransformer("all-MiniLM-L6-v2")
+            print("Embedder: all-MiniLM-L6-v2")
+        except Exception as e:
+            print(f"Embedder unavailable ({e}) — semantic search disabled")
 
-    # Load data
+    # Load data via EvolveMem adapter
+    LoCoMoAdapter, BenchmarkSample, token_f1 = _import_evolvemem()
     if benchmark_name == "locomo":
+        adapter = LoCoMoAdapter()
         path = data_path or "data/locomo10.json"
-        samples = _load_locomo(path, sample_index)
-        score_fn = token_f1
-        primary_metric = "f1"
-    elif benchmark_name == "membench":
-        path = data_path or "data/membench/repo/MemData"
-        samples = _load_membench(path)
-        score_fn = mcq_accuracy
-        primary_metric = "accuracy"
+        samples = adapter.load(path, sample_indices=sample_indices, max_qa=max_qa)
     else:
-        print(f"Benchmark '{benchmark_name}' not yet implemented")
-        return
+        raise ValueError(f"Benchmark '{benchmark_name}' not yet wired — only 'locomo' for now")
 
-    print(f"Samples: {len(samples)} | QA pairs: {sum(len(s.qa_pairs) for s in samples)}")
+    all_sessions: list[tuple[str, str, list[dict]]] = []
+    all_qa: list[dict] = []
+    for s in samples:
+        for sid, date, turns in s.sessions:
+            all_sessions.append((f"{s.sample_id}::{sid}", date, turns))
+        for qa in s.qa_pairs:
+            qa2 = dict(qa); qa2["_sample_id"] = s.sample_id
+            all_qa.append(qa2)
 
-    # Initial config
-    if initial == "weak":
-        config = RetrievalConfig(
-            semantic_top_k=0,
-            keyword_top_k=5,
-            structured_top_k=0,
-            max_context=8,
-            fusion_mode="keyword_only",
-            enable_intent_routing=False,
-            enable_entity_graph=False,
-            confidence_boost_weight=0.0,
-        )
-    else:
-        config = RetrievalConfig()  # Strong defaults
+    print(f"Samples: {len(samples)} | Sessions: {len(all_sessions)} | QA: {len(all_qa)}")
+    print(f"Primary metric: {adapter.primary_metric}")
 
-    # Setup store
-    import tempfile
+    # Extract memories from all sessions (MetaMem extractor)
     tmp_dir = tempfile.mkdtemp(prefix="metamem_bench_")
     store = MemoryStore(data_dir=tmp_dir, embedder=embedder)
     extractor = MemoryExtractor(llm_call=llm_call)
 
-    # Extract memories from sessions
-    print("\nExtracting memories...")
-    all_sessions = []
-    for sample in samples:
-        all_sessions.extend(sample.sessions)
-
+    print("\nExtracting memories from sessions...")
     memories = extractor.extract_from_sessions(all_sessions)
     for mem in memories:
         store.add(mem)
-    print(f"Extracted {len(memories)} typed memories")
-    print(f"  Store stats: {store.stats()}")
+    print(f"Extracted {len(memories)} typed memories → {store.stats()}")
+
+    # Initial RetrievalConfig
+    if initial == "weak":
+        ret_cfg = RetrievalConfig(
+            semantic_top_k=0, keyword_top_k=5, structured_top_k=0,
+            max_context=8, fusion_mode="keyword_only",
+            enable_intent_routing=False, enable_entity_graph=False,
+            confidence_boost_weight=0.0, enable_result_feedback=False,
+        )
+    else:
+        ret_cfg = RetrievalConfig()
 
     # Evolution loop
-    retriever = RetrievalEngine(store, config)
-    evolution_result = EvolutionResult()
-    best_score = 0.0
+    evolution = EvolutionResult()
+    best_f1 = 0.0
+    run_id = time.strftime(f"{benchmark_name}_{initial}_%Y%m%d_%H%M%S")
+    results_dir = f"benchmark_results/{benchmark_name}/{run_id}"
+    os.makedirs(results_dir, exist_ok=True)
 
     for round_id in range(max_rounds):
-        print(f"\n--- Round {round_id} ---")
-        print(f"Config: fusion={config.fusion_mode}, sem_k={config.semantic_top_k}, "
-              f"kw_k={config.keyword_top_k}, intent={config.enable_intent_routing}")
+        print(f"\n--- Round {round_id} "
+              f"[fusion={ret_cfg.fusion_mode} sem_k={ret_cfg.semantic_top_k} "
+              f"kw_k={ret_cfg.keyword_top_k} intent={ret_cfg.enable_intent_routing}] ---")
 
-        # Evaluate all QA pairs
+        retriever = RetrievalEngine(store, ret_cfg)
         round_results: list[dict] = []
-        total_score = 0.0
+        total_f1 = 0.0
+        by_cat: dict[str, list[float]] = {}
 
-        for sample in samples:
-            for qa in sample.qa_pairs:
-                question = qa.get("question", "")
-                reference = qa.get("answer", "")
-                if not question or not reference:
-                    continue
+        for qa in all_qa:
+            question = qa.get("question", "")
+            reference = qa.get("answer", "")
+            category = int(qa.get("category", 0))
+            if not question or not reference:
+                continue
 
-                # Retrieve context
-                query_emb = embedder.encode(question) if embedder else None
-                retrieved = retriever.search(question, config=config, query_embedding=query_emb)
-                context = format_context(retrieved, max_tokens=2000)
+            # Retrieve context (MetaMem retriever)
+            query_emb = embedder.encode(question) if embedder else None
+            retrieved = retriever.search(question, config=ret_cfg, query_embedding=query_emb)
+            context = format_context(retrieved, max_tokens=2000)
 
-                # Generate answer
-                answer_prompt = (
-                    f"Question: {question}\n\nContext:\n{context}\n\n"
-                    "Answer concisely in 1-10 words using exact words from context. "
-                    'Return JSON: {"answer": "..."}'
-                )
-                raw_answer = llm_call(
-                    [{"role": "user", "content": answer_prompt}],
-                    max_tokens=256, temperature=0.1,
-                )
+            # Build answer prompt (EvolveMem per-category prompt)
+            system, user = adapter.build_answer_prompt(question, context, qa)
+            raw = llm_call([{"role": "system", "content": system},
+                            {"role": "user", "content": user}], max_tokens=256)
+            prediction = _parse_answer(raw)
 
-                # Parse answer
-                prediction = raw_answer
-                try:
-                    match = re.search(r'"answer"\s*:\s*"([^"]*)"', raw_answer)
-                    if match:
-                        prediction = match.group(1)
-                except Exception:
-                    pass
+            # Score (EvolveMem token_f1)
+            score = token_f1(prediction, reference)
+            total_f1 += score
+            by_cat.setdefault(str(category), []).append(score)
 
-                # Score
-                score = score_fn(prediction, reference)
-                total_score += score
+            round_results.append({
+                "question": question, "reference": reference,
+                "prediction": prediction, "score": score,
+                "category": category,
+                "memories_used": [rm.memory.id for rm in retrieved[:5]],
+            })
 
-                round_results.append({
-                    "question": question,
-                    "reference": reference,
-                    "prediction": prediction,
-                    "score": score,
-                    "memories_used": [rm.memory.id for rm in retrieved[:5]],
-                })
+            # Evolution feedback — reinforce/decay retrieved memories
+            if ret_cfg.enable_result_feedback:
+                for rm in retrieved[:5]:
+                    if score > 0.5:
+                        store.reinforce(rm.memory.id)
+                    elif score < 0.1:
+                        store.decay(rm.memory.id, penalty=0.05)
 
-                # Evolution feedback
-                if config.enable_result_feedback:
-                    for rm in retrieved[:5]:
-                        if score > 0.5:
-                            store.reinforce(rm.memory.id, config.feedback_reinforcement)
-                        elif score < 0.1:
-                            store.decay(rm.memory.id, config.feedback_decay * 0.5)
+        n = len(round_results)
+        avg_f1 = total_f1 / max(n, 1)
+        cat_f1 = {cat: sum(scores) / len(scores) for cat, scores in by_cat.items()}
 
-        # Compute round metrics
-        n_qa = len(round_results)
-        avg_score = total_score / max(n_qa, 1)
-        round_result = RoundResult(
-            round_id=round_id,
-            primary_metric=avg_score,
-            total_questions=n_qa,
-            correct=sum(1 for r in round_results if r["score"] > 0.5),
-            config=asdict(config),
+        print(f"  F1={avg_f1:.4f}  correct(>0.5)={sum(1 for r in round_results if r['score']>0.5)}/{n}")
+        for cat, cf1 in sorted(cat_f1.items()):
+            print(f"    cat{cat}: {cf1:.4f}")
+
+        rr = RoundResult(
+            round_id=round_id, f1=avg_f1, by_category=cat_f1,
+            total=n, correct=sum(1 for r in round_results if r["score"] > 0.5),
+            config=asdict(ret_cfg), memory_count=len(store._memories),
         )
 
-        print(f"  {primary_metric}: {avg_score:.4f} ({round_result.correct}/{n_qa} correct)")
+        if avg_f1 > best_f1:
+            best_f1 = avg_f1
+            evolution.best_round = round_id
+            evolution.best_f1 = avg_f1
+            evolution.final_config = asdict(ret_cfg)
 
-        # Track best
-        if avg_score > best_score:
-            best_score = avg_score
-            evolution_result.best_round = round_id
-            evolution_result.best_score = avg_score
-            evolution_result.final_config = asdict(config)
+        # Save round detail
+        round_file = os.path.join(results_dir, f"round_{round_id}.jsonl")
+        with open(round_file, "w") as f:
+            for r in round_results:
+                f.write(json.dumps(r) + "\n")
 
-        # Diagnose and evolve (skip last round)
+        # Diagnose + evolve (skip last round)
         if round_id < max_rounds - 1:
-            suggestions = _diagnose_failures(round_results, config, llm_call)
+            suggestions = _diagnose_and_suggest(round_results, ret_cfg, llm_call)
             if suggestions:
-                config = _apply_suggestions(config, suggestions)
-                round_result.improvements = suggestions
-                print(f"  Improvements: {suggestions}")
+                ret_cfg = _apply_suggestions(ret_cfg, suggestions)
+                rr.improvements = suggestions
+                print(f"  → Improvements: {suggestions}")
             else:
-                # Manual evolution steps for early rounds
-                if round_id == 0 and config.semantic_top_k == 0:
-                    config.semantic_top_k = 15
-                    config.fusion_mode = "rrf"
-                    round_result.improvements = ["semantic_top_k=15", "fusion_mode=rrf"]
-                elif round_id == 1 and not config.enable_intent_routing:
-                    config.enable_intent_routing = True
-                    config.enable_entity_graph = True
-                    round_result.improvements = ["enable_intent_routing=True", "enable_entity_graph=True"]
-                elif round_id == 2:
-                    config.confidence_boost_weight = 0.3
-                    config.enable_result_feedback = True
-                    round_result.improvements = ["confidence_boost=0.3", "result_feedback=True"]
+                # Manual stepping when diagnosis is silent
+                if round_id == 0 and ret_cfg.semantic_top_k == 0:
+                    ret_cfg.semantic_top_k = 15
+                    ret_cfg.fusion_mode = "rrf"
+                    rr.improvements = ["semantic_top_k=15", "fusion_mode=rrf"]
+                elif round_id == 1 and not ret_cfg.enable_intent_routing:
+                    ret_cfg.enable_intent_routing = True
+                    ret_cfg.confidence_boost_weight = 0.3
+                    ret_cfg.enable_result_feedback = True
+                    rr.improvements = ["intent_routing=True", "conf_boost=0.3", "feedback=True"]
+                if rr.improvements:
+                    print(f"  → Manual step: {rr.improvements}")
 
-        evolution_result.rounds.append(round_result)
+        evolution.rounds.append(rr)
 
     # Final report
-    print(f"\n{'=' * 60}")
+    print(f"\n{'=' * 64}")
     print("EVOLUTION COMPLETE")
-    print(f"{'=' * 60}")
-    print(evolution_result.trajectory())
-    print(f"\nStore final stats: {store.stats()}")
+    print("=" * 64)
+    print(evolution.trajectory())
 
-    # Save results
-    results_dir = f"benchmark_results/{benchmark_name}"
-    os.makedirs(results_dir, exist_ok=True)
+    summary = {
+        "run_id": run_id, "benchmark": benchmark_name, "initial": initial,
+        "best_round": evolution.best_round, "best_f1": evolution.best_f1,
+        "final_config": evolution.final_config,
+        "store_stats": store.stats(),
+        "rounds": [asdict(r) for r in evolution.rounds],
+    }
     with open(os.path.join(results_dir, "evolution_summary.json"), "w") as f:
-        json.dump({
-            "benchmark": benchmark_name,
-            "best_round": evolution_result.best_round,
-            "best_score": evolution_result.best_score,
-            "final_config": evolution_result.final_config,
-            "rounds": [asdict(r) for r in evolution_result.rounds],
-        }, f, indent=2, default=str)
+        json.dump(summary, f, indent=2, default=str)
+    print(f"\nArtifacts: {results_dir}/")
 
-    print(f"\nResults saved to {results_dir}/")
-
-    # Cleanup
     store.close()
+    return evolution

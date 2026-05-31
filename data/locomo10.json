@@ -1,0 +1,118 @@
+[
+  {
+    "sample_id": 0,
+    "conversation": {
+      "speaker_a": "Alice",
+      "speaker_b": "Bob",
+      "session_1": [
+        {"speaker": "Alice", "text": "I just got back from my trip to Kyoto last week. The bamboo forest at Arashiyama was incredible."},
+        {"speaker": "Bob", "text": "That sounds amazing! How long were you there?"},
+        {"speaker": "Alice", "text": "Five days. I stayed at a ryokan near Fushimi Inari. My room was called the Sakura Suite."},
+        {"speaker": "Bob", "text": "Did you try the local food?"},
+        {"speaker": "Alice", "text": "Yes! I had the best ramen at a tiny place called Ichiran on my second day. Cost about 1200 yen."},
+        {"speaker": "Bob", "text": "What about work? Are you still at the same company?"},
+        {"speaker": "Alice", "text": "Yes, I've been at Tanaka Corp for three years now. I was promoted to senior engineer in January."}
+      ],
+      "session_1_date_time": "2024-03-15",
+      "session_2": [
+        {"speaker": "Bob", "text": "Hey, what stack do you work with at Tanaka Corp?"},
+        {"speaker": "Alice", "text": "Mostly Python and Rust. We switched from Go last year because of memory safety requirements."},
+        {"speaker": "Bob", "text": "What's your favourite thing about the new stack?"},
+        {"speaker": "Alice", "text": "The Rust borrow checker forces you to think about ownership which actually catches bugs early."},
+        {"speaker": "Bob", "text": "Didn't you mention you have a cat?"},
+        {"speaker": "Alice", "text": "Yes, her name is Mochi. She's a three-year-old orange tabby. She knocked over my laptop last Tuesday."},
+        {"speaker": "Bob", "text": "What do you feed her?"},
+        {"speaker": "Alice", "text": "She only eats Royal Canin Sensitive. Anything else upsets her stomach."}
+      ],
+      "session_2_date_time": "2024-03-22"
+    },
+    "qa": [
+      {"question": "Where did Alice stay in Kyoto?", "answer": "a ryokan near Fushimi Inari", "category": 1, "evidence": ["session_1"]},
+      {"question": "What is the name of Alice's cat?", "answer": "Mochi", "category": 1, "evidence": ["session_2"]},
+      {"question": "How long has Alice worked at Tanaka Corp?", "answer": "three years", "category": 1, "evidence": ["session_1"]},
+      {"question": "What programming language did Alice's team switch from?", "answer": "Go", "category": 1, "evidence": ["session_2"]},
+      {"question": "How much did Alice's ramen cost?", "answer": "1200 yen", "category": 1, "evidence": ["session_1"]},
+      {"question": "What cat food does Mochi eat?", "answer": "Royal Canin Sensitive", "category": 1, "evidence": ["session_2"]},
+      {"question": "When was Alice promoted to senior engineer?", "answer": "January", "category": 2, "evidence": ["session_1"]},
+      {"question": "What did Alice think of the bamboo forest?", "answer": "incredible", "category": 4, "evidence": ["session_1"]},
+      {"question": "Would Alice recommend Rust over Go for safety-critical software?", "answer": "Yes", "category": 3, "evidence": ["session_2"]},
+      {"question": "What did Alice's cat knock over?", "answer": "her laptop", "category": 1, "evidence": ["session_2"]}
+    ]
+  },
+  {
+    "sample_id": 1,
+    "conversation": {
+      "speaker_a": "Carlos",
+      "speaker_b": "Dana",
+      "session_1": [
+        {"speaker": "Carlos", "text": "I finally finished building my home server last weekend. Took me three months."},
+        {"speaker": "Dana", "text": "Nice! What specs did you go with?"},
+        {"speaker": "Carlos", "text": "AMD Ryzen 9 7950X, 128GB ECC RAM, and four 8TB drives in ZFS RAIDZ2."},
+        {"speaker": "Dana", "text": "That's serious hardware. What are you running on it?"},
+        {"speaker": "Carlos", "text": "Proxmox for virtualisation, with a Plex media server, Home Assistant, and a self-hosted Nextcloud."},
+        {"speaker": "Dana", "text": "Do you have off-site backup?"},
+        {"speaker": "Carlos", "text": "Yes, I sync encrypted snapshots to Backblaze B2 every night at 2am."}
+      ],
+      "session_1_date_time": "2024-04-01",
+      "session_2": [
+        {"speaker": "Dana", "text": "What's the power draw on that server?"},
+        {"speaker": "Carlos", "text": "About 180 watts idle, 350 at peak. My electricity bill went up about 40 pounds a month."},
+        {"speaker": "Dana", "text": "Worth it for the privacy though. Are you running any AI workloads?"},
+        {"speaker": "Carlos", "text": "Yes, I have Ollama running Llama 3.1 70B quantised. My wife uses it for recipe generation."},
+        {"speaker": "Dana", "text": "What GPU?"},
+        {"speaker": "Carlos", "text": "Two RTX 4090s in the same machine. Overkill maybe but I wanted to run 70B without offloading."}
+      ],
+      "session_2_date_time": "2024-04-08"
+    },
+    "qa": [
+      {"question": "How much RAM does Carlos's server have?", "answer": "128GB ECC RAM", "category": 1, "evidence": ["session_1"]},
+      {"question": "What hypervisor does Carlos use?", "answer": "Proxmox", "category": 1, "evidence": ["session_1"]},
+      {"question": "Where does Carlos store off-site backups?", "answer": "Backblaze B2", "category": 1, "evidence": ["session_1"]},
+      {"question": "What time does the backup sync run?", "answer": "2am", "category": 2, "evidence": ["session_1"]},
+      {"question": "How much did Carlos's electricity bill increase?", "answer": "40 pounds a month", "category": 1, "evidence": ["session_2"]},
+      {"question": "What AI model does Carlos run locally?", "answer": "Llama 3.1 70B", "category": 1, "evidence": ["session_2"]},
+      {"question": "What does Carlos's wife use the AI for?", "answer": "recipe generation", "category": 1, "evidence": ["session_2"]},
+      {"question": "How many GPUs does the server have?", "answer": "two", "category": 1, "evidence": ["session_2"]},
+      {"question": "Would Carlos's server run a 70B model without offloading?", "answer": "Yes", "category": 3, "evidence": ["session_2"]},
+      {"question": "How long did it take Carlos to build his home server?", "answer": "three months", "category": 2, "evidence": ["session_1"]}
+    ]
+  },
+  {
+    "sample_id": 2,
+    "conversation": {
+      "speaker_a": "Eve",
+      "speaker_b": "Frank",
+      "session_1": [
+        {"speaker": "Eve", "text": "I defended my PhD thesis last Friday! Six years of work finally done."},
+        {"speaker": "Frank", "text": "Congratulations! What was your thesis on?"},
+        {"speaker": "Eve", "text": "Adversarial robustness in vision transformers. Specifically defending against patch attacks."},
+        {"speaker": "Frank", "text": "Who was your supervisor?"},
+        {"speaker": "Eve", "text": "Professor Chen at MIT. She's been working on adversarial ML since 2015."},
+        {"speaker": "Frank", "text": "Are you staying in academia or going industry?"},
+        {"speaker": "Eve", "text": "I'm joining Anthropic as a research scientist in September. Safety team."}
+      ],
+      "session_1_date_time": "2024-05-10",
+      "session_2": [
+        {"speaker": "Frank", "text": "That's a great fit given your adversarial robustness background."},
+        {"speaker": "Eve", "text": "Exactly what they said. The offer was 310k base plus RSUs."},
+        {"speaker": "Frank", "text": "Are you relocating?"},
+        {"speaker": "Eve", "text": "Yes, moving from Boston to San Francisco in August. Already found a flat in the Mission district."},
+        {"speaker": "Frank", "text": "Are you bringing your dog?"},
+        {"speaker": "Eve", "text": "Yes, Max is coming. He's a two-year-old border collie. The building is pet friendly."}
+      ],
+      "session_2_date_time": "2024-05-17"
+    },
+    "qa": [
+      {"question": "What was Eve's PhD thesis topic?", "answer": "adversarial robustness in vision transformers", "category": 1, "evidence": ["session_1"]},
+      {"question": "Who was Eve's PhD supervisor?", "answer": "Professor Chen", "category": 1, "evidence": ["session_1"]},
+      {"question": "Which company is Eve joining?", "answer": "Anthropic", "category": 1, "evidence": ["session_1"]},
+      {"question": "What team will Eve work on?", "answer": "safety team", "category": 1, "evidence": ["session_1"]},
+      {"question": "Where is Eve moving to?", "answer": "San Francisco", "category": 1, "evidence": ["session_2"]},
+      {"question": "What neighbourhood did Eve find a flat in?", "answer": "Mission district", "category": 1, "evidence": ["session_2"]},
+      {"question": "What is Eve's dog's name?", "answer": "Max", "category": 1, "evidence": ["session_2"]},
+      {"question": "What breed is Eve's dog?", "answer": "border collie", "category": 1, "evidence": ["session_2"]},
+      {"question": "When is Eve moving to San Francisco?", "answer": "August", "category": 2, "evidence": ["session_2"]},
+      {"question": "Would Eve's background make her a good fit for AI safety research?", "answer": "Yes", "category": 3, "evidence": ["session_1", "session_2"]}
+    ]
+  }
+]

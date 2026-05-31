@@ -154,11 +154,26 @@ def handle_session_start(payload: dict) -> dict:
     """Inject prior project context into Claude's context window."""
     sm = _make_session(payload)
     context = sm.get_context_injection()
+
+    # Count how many memories exist in the store at session start
+    try:
+        from .models import MemoryType
+        sm._memories_loaded = sum(
+            len(sm.store.get_by_type(mt)) for mt in MemoryType
+        )
+        sm._write_manifest()
+    except Exception:
+        pass
+
     if not context:
         return {"continue": True}
     sessions = sm.list_sessions(limit=1)
     last = sessions[0] if sessions else {}
-    msg = f"🧠 MetaMem: context loaded ({last.get('event_count', 0)} events from last session)"
+    msg = (
+        f"🧠 MetaMem: context loaded ({last.get('event_count', 0)} events from last session"
+        + (f", {sm._memories_loaded} memories available" if sm._memories_loaded else "")
+        + ")"
+    )
     return {
         "continue": True,
         "systemMessage": msg,
@@ -176,6 +191,15 @@ def handle_user_prompt_submit(payload: dict) -> dict:
     from .mcp_server import mem_search
     result = mem_search(query=prompt, limit=5)
     hits = result.get("results", [])
+
+    # Accumulate hit count in manifest regardless of whether we inject
+    try:
+        sm = _make_session(payload)
+        sm._memory_hits += len(hits)
+        sm._write_manifest()
+    except Exception:
+        pass
+
     if not hits:
         return {"continue": True}
 
@@ -183,7 +207,7 @@ def handle_user_prompt_submit(payload: dict) -> dict:
     injected = "\n".join(lines)
     return {
         "continue": True,
-        "systemMessage": f"📝 MetaMem: {len(hits)} relevant memories",
+        "systemMessage": f"📝 MetaMem: {len(hits)} relevant memories matched",
         "systemPrompt": f"<metamem-recall>\n{injected}\n</metamem-recall>",
     }
 
@@ -225,14 +249,33 @@ def handle_stop(payload: dict) -> dict:
 
 
 def handle_session_end(payload: dict) -> dict:
-    """Finalize the session — generate a summary and absorb into project memory."""
+    """Finalize the session — distill memories and write hit stats to ledger."""
     sm = _make_session(payload)
     if not sm.session.events:
         return {"continue": True}
     sm.finalize()
-    return {
-        "systemMessage": f"📦 MetaMem: session finalized ({len(sm.session.events)} events)"
-    }
+
+    # Write memory hit stats to the ledger for dashboard aggregation
+    try:
+        from . import usage as _usage
+        data_dir = os.environ.get("METAMEM_DATA_DIR", os.path.expanduser("~/.metamem"))
+        _usage.record_memory_hits(data_dir, {
+            "ts": time.time(),
+            "session_id": sm.session_id,
+            "project": sm.config.project,
+            "memories_loaded": sm._memories_loaded,
+            "memory_hits": sm._memory_hits,
+            "memories_distilled": sm._memories_distilled,
+        })
+    except Exception:
+        pass
+
+    distilled = sm._memories_distilled
+    msg = f"📦 MetaMem: session finalized ({len(sm.session.events)} events"
+    if distilled:
+        msg += f", {distilled} new memories distilled"
+    msg += ")"
+    return {"systemMessage": msg}
 
 
 # ── Dispatch ──

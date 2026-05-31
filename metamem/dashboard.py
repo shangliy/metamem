@@ -106,6 +106,15 @@ def collect_usage(data_dir: str, project: str | None) -> dict[str, Any]:
     return _usage.summarize(records)
 
 
+def collect_memory_hits(data_dir: str, project: str | None) -> dict[str, Any]:
+    """Summarize memory hit stats, optionally filtered to one project."""
+    from . import usage as _usage
+    records = _usage.load_memory_hits(data_dir)
+    if project:
+        records = [r for r in records if r.get("project") == project]
+    return _usage.summarize_memory_hits(records)
+
+
 def create_app():
     """Build the FastAPI app for the dashboard."""
     from fastapi import FastAPI
@@ -133,6 +142,10 @@ def create_app():
     @app.get("/api/usage")
     def api_usage(project: str | None = None):
         return JSONResponse(collect_usage(_data_dir(), project))
+
+    @app.get("/api/memory-hits")
+    def api_memory_hits(project: str | None = None):
+        return JSONResponse(collect_memory_hits(_data_dir(), project))
 
     return app
 

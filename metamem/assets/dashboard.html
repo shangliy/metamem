@@ -62,6 +62,12 @@
   </section>
 
   <section>
+    <h2>Memory Efficiency</h2>
+    <div class="cards" id="hits-cards"></div>
+    <div id="hits-by-project" style="margin-top:16px"></div>
+  </section>
+
+  <section>
     <h2>Memories</h2>
     <div id="memories"></div>
   </section>
@@ -133,6 +139,36 @@ async function loadUsage(project) {
     `<table><thead><tr><th>Project</th><th>Turns</th><th>Input</th><th>Output</th><th>Total</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
+async function loadMemoryHits(project) {
+  const q = project ? `?project=${encodeURIComponent(project)}` : "";
+  const data = await getJSON("/api/memory-hits" + q);
+  const t = data.totals || {};
+  const hitRate = t.memory_hits > 0
+    ? ((t.memory_hits / (data.sessions || 1)).toFixed(1) + " hits/session")
+    : "—";
+  $("#hits-cards").innerHTML =
+    card("Sessions tracked", fmt(data.sessions)) +
+    card("Memories loaded", fmt(t.memories_loaded)) +
+    card("Memory hits", fmt(t.memory_hits)) +
+    card("Memories distilled", fmt(t.memories_distilled)) +
+    card("Avg hits/session", hitRate);
+
+  const byProj = data.by_project || {};
+  const projects = Object.keys(byProj);
+  if (!projects.length) {
+    $("#hits-by-project").innerHTML = '<div class="empty">No memory hit data yet — recorded at session end after distillation.</div>';
+    return;
+  }
+  let rows = projects.map(p => {
+    const d = byProj[p];
+    return `<tr><td>${p}</td><td>${fmt(d.sessions)}</td>
+      <td>${fmt(d.memories_loaded)}</td><td>${fmt(d.memory_hits)}</td>
+      <td>${fmt(d.memories_distilled)}</td></tr>`;
+  }).join("");
+  $("#hits-by-project").innerHTML =
+    `<table><thead><tr><th>Project</th><th>Sessions</th><th>Loaded</th><th>Hits</th><th>Distilled</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
 async function loadMemories(project) {
   const q = project ? `?project=${encodeURIComponent(project)}` : "";
   const data = await getJSON("/api/memories" + q);
@@ -153,7 +189,7 @@ async function loadMemories(project) {
 async function refresh() {
   const project = $("#project").value;
   try {
-    await Promise.all([loadStats(project), loadUsage(project), loadMemories(project)]);
+    await Promise.all([loadStats(project), loadUsage(project), loadMemoryHits(project), loadMemories(project)]);
   } catch (e) {
     console.error(e);
   }

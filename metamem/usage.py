@@ -68,6 +68,59 @@ def build_record(
     return record
 
 
+def _hits_ledger_path(data_dir: str) -> Path:
+    return Path(data_dir) / "usage" / "memory_hits.jsonl"
+
+
+def record_memory_hits(data_dir: str, record: dict[str, Any]) -> None:
+    """Append a memory-hit record to the hits ledger (append-only)."""
+    path = _hits_ledger_path(data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+def load_memory_hits(data_dir: str) -> list[dict]:
+    """Load all memory-hit records from the hits ledger."""
+    path = _hits_ledger_path(data_dir)
+    if not path.exists():
+        return []
+    records: list[dict] = []
+    try:
+        for line in path.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    except OSError:
+        return []
+    return records
+
+
+def summarize_memory_hits(records: list[dict]) -> dict[str, Any]:
+    """Aggregate memory-hit records into totals and per-project view."""
+    totals = {"memories_loaded": 0, "memory_hits": 0, "memories_distilled": 0}
+    by_project: dict[str, dict[str, int]] = {}
+
+    for rec in records:
+        proj = rec.get("project", "unknown")
+        prj = by_project.setdefault(proj, {"memories_loaded": 0, "memory_hits": 0, "memories_distilled": 0, "sessions": 0})
+        prj["sessions"] += 1
+        for field in ("memories_loaded", "memory_hits", "memories_distilled"):
+            val = int(rec.get(field, 0) or 0)
+            totals[field] += val
+            prj[field] += val
+
+    return {
+        "totals": totals,
+        "sessions": len(records),
+        "by_project": by_project,
+    }
+
+
 def load_usage(data_dir: str) -> list[dict]:
     """Load all usage records from the ledger, skipping malformed lines."""
     path = _ledger_path(data_dir)

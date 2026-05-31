@@ -314,3 +314,93 @@ def format_context(results: list[RetrievedMemory], max_tokens: int = 4000) -> st
         lines.append(entry)
         token_est += entry_tokens
     return "\n".join(lines)
+
+
+class IterativeRetrievalEngine:
+    """Retrieval with LLM-driven gap detection and follow-up queries.
+
+    Design principle: store raw → retrieve raw → LLM reads and decides what
+    it still needs. The LLM at query time is smarter than any pre-computed
+    index. One lightweight coverage-check call (≤50 output tokens) decides
+    whether a follow-up retrieval is needed — max 2 rounds, keeping total
+    LLM calls to 2 (vs SimpleMem's 3+).
+
+    Directly addresses the bridge-question gap: one-shot retrieval misses the
+    second supporting paragraph when it isn't lexically related to the query.
+    The gap-detection step identifies the missing entity and re-queries for it.
+    """
+
+    def __init__(
+        self,
+        store: MemoryStore,
+        llm_call,                   # fn(messages, max_tokens, temperature) → str
+        config: RetrievalConfig | None = None,
+        embedder=None,
+        max_rounds: int = 2,
+    ):
+        self.engine = RetrievalEngine(store, config)
+        self.llm_call = llm_call
+        self.embedder = embedder
+        self.max_rounds = max_rounds
+
+    def search(
+        self,
+        query: str,
+        config: RetrievalConfig | None = None,
+    ) -> list[RetrievedMemory]:
+        """Iterative retrieval: retrieve → check coverage → optionally re-query."""
+        import json as _json
+        import re as _re
+
+        cfg = config or self.engine.config
+        seen_ids: set[str] = set()
+        all_results: list[RetrievedMemory] = []
+
+        current_query = query
+        for round_idx in range(self.max_rounds):
+            q_emb = self.embedder.encode(current_query) if self.embedder else None
+            new = [
+                rm for rm in self.engine.search(current_query, cfg, q_emb)
+                if rm.memory.id not in seen_ids
+            ]
+            for rm in new:
+                seen_ids.add(rm.memory.id)
+                all_results.append(rm)
+
+            # On the last round, skip the coverage check
+            if round_idx >= self.max_rounds - 1:
+                break
+
+            # Coverage check: does the retrieved context answer the question,
+            # or is there a specific gap that a follow-up query would fill?
+            context_snippet = "\n".join(
+                rm.memory.content[:200] for rm in all_results[:6]
+            )
+            check_prompt = (
+                f"Question: {query}\n\n"
+                f"Retrieved so far:\n{context_snippet}\n\n"
+                "Does the retrieved context contain enough information to answer "
+                "the question? If YES, output {\"sufficient\": true}. "
+                "If NO, output {\"sufficient\": false, \"follow_up\": \"<one targeted query>\"}. "
+                "Output JSON only, no explanation. Be concise."
+            )
+            raw = self.llm_call(
+                [{"role": "user", "content": check_prompt}],
+                max_tokens=60, temperature=0.0,
+            )
+            try:
+                m = _re.search(r'\{.*\}', raw, _re.DOTALL)
+                decision = _json.loads(m.group()) if m else {}
+            except Exception:
+                decision = {}
+
+            if decision.get("sufficient", True):
+                break
+            follow_up = (decision.get("follow_up") or "").strip()
+            if not follow_up or follow_up == current_query:
+                break
+            current_query = follow_up
+
+        # Re-rank merged results by score, keep max_context
+        all_results.sort(key=lambda x: x.score, reverse=True)
+        return all_results[: cfg.max_context]

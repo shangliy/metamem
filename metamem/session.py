@@ -148,6 +148,12 @@ class SessionManager:
         # Project-scoped memory store
         self._store: MemoryStore | None = None
 
+        # Hit counters — persisted across hook invocations via manifest
+        loaded, hits, distilled = self._load_hit_stats()
+        self._memories_loaded: int = loaded
+        self._memory_hits: int = hits
+        self._memories_distilled: int = distilled
+
         # Write manifest
         self._write_manifest()
 
@@ -199,6 +205,21 @@ class SessionManager:
         }
         self._events_file.write(json.dumps(record) + "\n")
         self._events_file.flush()
+
+    def _load_hit_stats(self) -> tuple[int, int, int]:
+        """Read (memories_loaded, memory_hits, memories_distilled) from existing manifest."""
+        manifest_file = self.session_dir / "manifest.json"
+        if manifest_file.exists():
+            try:
+                d = json.loads(manifest_file.read_text())
+                return (
+                    int(d.get("memories_loaded", 0)),
+                    int(d.get("memory_hits", 0)),
+                    int(d.get("memories_distilled", 0)),
+                )
+            except Exception:
+                pass
+        return 0, 0, 0
 
     def _reload_events(self):
         """Load events already persisted for this session id into memory.
@@ -385,13 +406,98 @@ class SessionManager:
                 content += f"- [{evt.type}] {evt.content[:200]}\n"
             topic_file.write_text(content)
 
+        # Distill session events into typed persistent memories
+        self._memories_distilled = self._distill_to_store()
+
         # Update manifest
         self._write_manifest()
 
         # Close files
         self._events_file.close()
 
-        logger.info("Session finalized: %s (%d events)", self.session_id, len(self.session.events))
+        logger.info(
+            "Session finalized: %s (%d events, %d memories distilled)",
+            self.session_id, len(self.session.events), self._memories_distilled,
+        )
+
+    def _distill_to_store(self) -> int:
+        """Call Anthropic API to extract typed memories from session events.
+
+        Returns the number of memories written to the store, or 0 if skipped.
+        Silently degrades when ANTHROPIC_API_KEY is absent or the call fails.
+        """
+        import os
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            return 0
+        if len(self.session.events) < 2:
+            return 0
+
+        events_text = "\n\n".join(
+            f"[{e.type}] {e.content[:400]}"
+            for e in self.session.events[-40:]
+        )
+        prompt = (
+            "You are analyzing a Claude Code work session to extract durable memories for future sessions.\n\n"
+            f"Session events:\n{events_text}\n\n"
+            "Extract 0-8 memories worth keeping for FUTURE sessions. Types:\n"
+            "- semantic: project facts (file locations, architecture, APIs, conventions, decisions)\n"
+            "- procedural: how-to knowledge (commands, workflows, step-by-step procedures)\n"
+            "- failure: what went wrong / what to avoid (bugs, wrong approaches)\n"
+            "- instruction: user rules/preferences stated explicitly\n"
+            "- episodic: what was accomplished this session (tasks done, code generated)\n\n"
+            "Only include memories reusable in future sessions. Skip conversational filler.\n\n"
+            'Respond with a JSON array ONLY (no markdown fences). Each item: {"type": "...", '
+            '"content": "1-3 sentences", "summary": "max 80 chars", '
+            '"importance": 0.0-1.0, "entities": [...], "tags": [...]}\n'
+            "Return [] if nothing is worth keeping."
+        )
+
+        try:
+            import anthropic
+            client = anthropic.Anthropic()
+            response = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=1200,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```"):
+                text = text.split("```", 2)[1]
+                if text.startswith("json"):
+                    text = text[4:]
+
+            memories_data = json.loads(text)
+            if not isinstance(memories_data, list):
+                return 0
+
+            count = 0
+            for item in memories_data:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    mem_type = MemoryType(item.get("type", "semantic"))
+                except ValueError:
+                    mem_type = MemoryType.SEMANTIC
+                content = (item.get("content") or "").strip()
+                if not content:
+                    continue
+                mem = MemoryUnit(
+                    content=content,
+                    type=mem_type,
+                    summary=(item.get("summary") or content[:80]).strip(),
+                    importance=float(item.get("importance", 0.5)),
+                    entities=item.get("entities") or [],
+                    tags=item.get("tags") or [],
+                    confidence=0.7,
+                    source_sessions=[self.session_id],
+                )
+                self.store.add(mem)
+                count += 1
+
+            return count
+        except Exception as e:
+            logger.warning("Memory distillation failed: %s", e)
+            return 0
 
     def _auto_summarize(self, llm_call) -> str:
         """Use LLM to summarize the session."""
@@ -417,6 +523,9 @@ class SessionManager:
             "status": self.session.status,
             "event_count": len(self.session.events),
             "topic_count": len(self.session.topics),
+            "memories_loaded": self._memories_loaded,
+            "memory_hits": self._memory_hits,
+            "memories_distilled": self._memories_distilled,
         }
         (self.session_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
 
