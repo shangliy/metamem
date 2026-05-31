@@ -29,14 +29,14 @@ from .models import (
 logger = logging.getLogger(__name__)
 
 # Default data directory
-DEFAULT_DATA_DIR = os.path.expanduser("~/.metamem")
+DEFAULT_DATA_DIR = os.path.expanduser("~/.mem-engram")
 
 
 class MemoryStore:
     """Unified memory store with typed access patterns.
 
     Storage layout:
-        ~/.metamem/
+        ~/.mem-engram/
         ├── memory.db          # SQLite — metadata, entities, FTS, evolution log
         ├── sessions/          # Per-session folders
         └── embeddings/        # Numpy arrays for vector search

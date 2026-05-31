@@ -240,7 +240,7 @@ def run_benchmark(
     print(f"Primary metric: {adapter.primary_metric}")
 
     # Extract memories from all sessions (MetaMem extractor)
-    tmp_dir = tempfile.mkdtemp(prefix="metamem_bench_")
+    tmp_dir = tempfile.mkdtemp(prefix="mem_engram_bench_")
     store = MemoryStore(data_dir=tmp_dir, embedder=embedder)
     extractor = MemoryExtractor(llm_call=llm_call)
 

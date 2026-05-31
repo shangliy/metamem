@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from metamem import hooks
+from mem_engram import hooks
 
 
 # ── Transcript parsing ──
@@ -142,7 +142,7 @@ def test_handle_stop_no_transcript():
 
 
 def test_handle_session_end_no_events(tmp_path, monkeypatch):
-    monkeypatch.setenv("METAMEM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MEM_ENGRAM_DATA_DIR", str(tmp_path))
     result = hooks.handle_session_end({"session_id": "test123", "cwd": str(tmp_path)})
     assert result.get("continue") is True
 
@@ -156,7 +156,7 @@ def test_safe_session_id_sanitizes():
 
 
 def test_stop_then_session_end_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setenv("METAMEM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MEM_ENGRAM_DATA_DIR", str(tmp_path))
     transcript = tmp_path / "transcript.jsonl"
     lines = [
         _user("How do I configure logging?"),

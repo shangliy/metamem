@@ -1,8 +1,8 @@
-# MetaMem: A Self-Evolving Typed Memory System for LLM Agents with Iterative Retrieval
+# Mem-Engram: A Self-Evolving Typed Memory System for LLM Agents with Iterative Retrieval
 
 **Abstract**
 
-We present MetaMem, a persistent memory framework for LLM-based agents that stores, retrieves, and evolves knowledge across sessions. MetaMem makes three contributions: (1) a five-type memory taxonomy (episodic, semantic, procedural, failure, instruction) with confidence-weighted retrieval, (2) a session-end distillation pipeline that automatically extracts structured memories from raw conversation events using a lightweight LLM, and (3) an iterative retrieval engine that performs LLM-driven gap detection to resolve multi-hop queries without expensive pre-retrieval planning. On HotpotQA (distractor setting, $n=50$), MetaMem achieves F1=0.558 and retrieval recall=0.810, outperforming SimpleMem (F1=0.519, recall=0.780) while running 11.6× faster (0.87 s vs 10.06 s per query). Iterative retrieval closes the bridge-question gap by +0.094 F1, bringing MetaMem to competitive performance on multi-hop reasoning (F1=0.570 vs SimpleMem's 0.598) while preserving a 0.49 F1 advantage on comparison questions (0.808 vs 0.316). We further show that dense retrieval alone accounts for a 7.7× F1 improvement over BM25 keyword search (0.076→0.588), validating the core design principle that raw storage with LLM-time understanding outperforms pre-structured knowledge graphs.
+We present Mem-Engram, a persistent memory framework for LLM-based agents that stores, retrieves, and evolves knowledge across sessions. Mem-Engram makes three contributions: (1) a five-type memory taxonomy (episodic, semantic, procedural, failure, instruction) with confidence-weighted retrieval, (2) a session-end distillation pipeline that automatically extracts structured memories from raw conversation events using a lightweight LLM, and (3) an iterative retrieval engine that performs LLM-driven gap detection to resolve multi-hop queries without expensive pre-retrieval planning. On HotpotQA (distractor setting, $n=50$), Mem-Engram achieves F1=0.558 and retrieval recall=0.810, outperforming SimpleMem (F1=0.519, recall=0.780) while running 11.6× faster (0.87 s vs 10.06 s per query). Iterative retrieval closes the bridge-question gap by +0.094 F1, bringing Mem-Engram to competitive performance on multi-hop reasoning (F1=0.570 vs SimpleMem's 0.598) while preserving a 0.49 F1 advantage on comparison questions (0.808 vs 0.316). We further show that dense retrieval alone accounts for a 7.7× F1 improvement over BM25 keyword search (0.076→0.588), validating the core design principle that raw storage with LLM-time understanding outperforms pre-structured knowledge graphs.
 
 ---
 
@@ -14,14 +14,14 @@ Existing approaches address it in one of two ways. **Retrieval-Augmented Generat
 
 We argue this assumption is wrong, and that it reflects an LLM-era anti-pattern inherited from classical IR and database design. The LLM at query time is smarter than the LLM at write time. Pre-classifying memories into rigid schemas, building knowledge graphs, or generating structured summaries during storage limits what can be recovered — the pre-processing model cannot anticipate what future queries will need. A more principled approach stores raw content and lets the retrieval-time LLM build its own understanding from what it reads.
 
-This paper presents **MetaMem**, a memory system built around this principle. MetaMem stores raw session events, distills them into typed memory units at session end using a lightweight LLM pass, and retrieves them using dense embedding similarity with optional iterative gap detection. The typed taxonomy is an *acceleration index*, not the source of truth — raw events are always preserved and take precedence over any derived structure.
+This paper presents **Mem-Engram**, a memory system built around this principle. Mem-Engram stores raw session events, distills them into typed memory units at session end using a lightweight LLM pass, and retrieves them using dense embedding similarity with optional iterative gap detection. The typed taxonomy is an *acceleration index*, not the source of truth — raw events are always preserved and take precedence over any derived structure.
 
 Our empirical contributions are:
 
-1. MetaMem outperforms SimpleMem [citation] overall (F1 +0.039, recall +0.030) while being 11.6× faster on HotpotQA multi-hop QA.
+1. Mem-Engram outperforms SimpleMem [citation] overall (F1 +0.039, recall +0.030) while being 11.6× faster on HotpotQA multi-hop QA.
 2. Dense retrieval alone produces a 100× F1 improvement over keyword search (0.076 → 0.588 → 0.558 after evolution), confirming the core design claim.
 3. Iterative retrieval with LLM gap detection adds +0.094 F1 on bridge questions using a single additional LLM call (60 output tokens), closing the multi-hop gap without the overhead of full planning.
-4. MetaMem achieves 0.808 F1 on comparison questions, a +0.49 advantage over SimpleMem (0.316), because simultaneous multi-entity retrieval outperforms sequential query planning for parallel fact lookup.
+4. Mem-Engram achieves 0.808 F1 on comparison questions, a +0.49 advantage over SimpleMem (0.316), because simultaneous multi-entity retrieval outperforms sequential query planning for parallel fact lookup.
 
 ---
 
@@ -33,9 +33,9 @@ Our empirical contributions are:
 
 **Mem0** and related systems treat memory as a key-value store with semantic search, storing LLM-generated summaries rather than raw events. The summarization step compresses information but introduces hallucination risk and loses low-level detail.
 
-**SimpleMem** [citation] introduces a three-stage pipeline: (1) sliding-window semantic compression using an LLM, (2) intra-session synthesis to generate MemoryEntry objects with resolved coreferences, and (3) intent-aware hybrid retrieval with planning and reflection. SimpleMem achieves strong performance on LoCoMo [citation] but its multi-call per-query architecture (3+ LLM calls for planning + reflection + answering) results in high latency. MetaMem's iterative engine achieves comparable bridge-question performance with 2 LLM calls.
+**SimpleMem** [citation] introduces a three-stage pipeline: (1) sliding-window semantic compression using an LLM, (2) intra-session synthesis to generate MemoryEntry objects with resolved coreferences, and (3) intent-aware hybrid retrieval with planning and reflection. SimpleMem achieves strong performance on LoCoMo [citation] but its multi-call per-query architecture (3+ LLM calls for planning + reflection + answering) results in high latency. Mem-Engram's iterative engine achieves comparable bridge-question performance with 2 LLM calls.
 
-**EvolveMem** [citation] extends SimpleMem with a self-evolution loop that adjusts retrieval hyperparameters through LLM-diagnosed failure analysis across multiple evaluation rounds. MetaMem adopts EvolveMem's benchmark evaluation protocol and builds a compatible evolution loop using an Anthropic-native LLM backend.
+**EvolveMem** [citation] extends SimpleMem with a self-evolution loop that adjusts retrieval hyperparameters through LLM-diagnosed failure analysis across multiple evaluation rounds. Mem-Engram adopts EvolveMem's benchmark evaluation protocol and builds a compatible evolution loop using an Anthropic-native LLM backend.
 
 ### 2.2 Multi-Hop Retrieval
 
@@ -51,7 +51,7 @@ The tension between pre-structured indexes and raw retrieval mirrors a long deba
 
 ### 3.1 Overview
 
-MetaMem operates at two timescales:
+Mem-Engram operates at two timescales:
 
 - **Intra-session**: a `SessionManager` captures raw conversation events (user turns, tool calls, assistant responses) in an append-only JSONL log via Claude Code lifecycle hooks.
 - **Cross-session**: at session end, a distillation pass extracts durable typed memories from the raw event log and stores them in a SQLite-backed `MemoryStore` with embedding vectors.
@@ -88,7 +88,7 @@ At query time, a `RetrievalEngine` (or its iterative variant `IterativeRetrieval
 
 ### 3.2 Five-Type Memory Taxonomy
 
-MetaMem organises memories into five types, each with a different retrieval role:
+Mem-Engram organises memories into five types, each with a different retrieval role:
 
 | Type | Purpose | Retrieval weight |
 |---|---|---|
@@ -154,7 +154,7 @@ The `mem_feedback(description, memory_ids, status)` MCP tool invokes these on th
 
 ### 3.7 Claude Code Integration
 
-MetaMem registers as an MCP server and installs four lifecycle hooks in `~/.claude/settings.json`:
+Mem-Engram registers as an MCP server and installs four lifecycle hooks in `~/.claude/settings.json`:
 
 | Hook | Trigger | Action |
 |---|---|---|
@@ -182,13 +182,13 @@ We evaluate on **HotpotQA** [Yang et al., 2018], distractor setting, validation 
 
 ### 4.2 Systems
 
-**MetaMem (one-shot)**: `RetrievalEngine` with RRF fusion, `semantic_top_k=5`, `keyword_top_k=5`, `max_context=5`. All-MiniLM-L6-v2 embeddings.
+**Mem-Engram (one-shot)**: `RetrievalEngine` with RRF fusion, `semantic_top_k=5`, `keyword_top_k=5`, `max_context=5`. All-MiniLM-L6-v2 embeddings.
 
-**MetaMem (iterative)**: `IterativeRetrievalEngine` with the same base config and `max_rounds=2`.
+**Mem-Engram (iterative)**: `IterativeRetrievalEngine` with the same base config and `max_rounds=2`.
 
 **SimpleMem**: Original SimpleMem system with `enable_planning=True`, `enable_reflection=True`, `max_reflection_rounds=1`. Qwen3-Embedding-0.6B (1024-dim).
 
-All systems use `claude-haiku-4-5-20251001` as the LLM for answer generation. SimpleMem uses it additionally for retrieval planning and reflection. MetaMem (iterative) uses it for the coverage check.
+All systems use `claude-haiku-4-5-20251001` as the LLM for answer generation. SimpleMem uses it additionally for retrieval planning and reflection. Mem-Engram (iterative) uses it for the coverage check.
 
 ### 4.3 Main Results
 
@@ -199,10 +199,10 @@ Table 1 shows the head-to-head results on 50 HotpotQA examples.
 | System | Answer F1 | Retrieval Recall | Avg Latency (s) |
 |---|---|---|---|
 | SimpleMem | 0.519 | 0.780 | 10.06 |
-| MetaMem (one-shot) | 0.558 | 0.810 | **0.87** |
-| MetaMem (iterative) | **~0.640** | **~0.830** | ~1.5 |
+| Mem-Engram (one-shot) | 0.558 | 0.810 | **0.87** |
+| Mem-Engram (iterative) | **~0.640** | **~0.830** | ~1.5 |
 
-MetaMem (one-shot) outperforms SimpleMem on both F1 (+3.9%) and retrieval recall (+3.0%) while being **11.6× faster**. The speed advantage comes from eliminating the planning phase: SimpleMem generates 2–3 sub-queries with one LLM call, executes them in parallel, and runs a reflection check before answering — 3+ LLM calls vs MetaMem's 1.
+Mem-Engram (one-shot) outperforms SimpleMem on both F1 (+3.9%) and retrieval recall (+3.0%) while being **11.6× faster**. The speed advantage comes from eliminating the planning phase: SimpleMem generates 2–3 sub-queries with one LLM call, executes them in parallel, and runs a reflection check before answering — 3+ LLM calls vs Mem-Engram's 1.
 
 ### 4.4 Question-Type Analysis
 
@@ -213,18 +213,18 @@ The aggregate numbers mask a critical bifurcation by question type (Table 2).
 | System | Bridge F1 | Bridge Recall | Comparison F1 | Comparison Recall |
 |---|---|---|---|---|
 | SimpleMem | **0.598** | 0.722 | 0.316 | 0.929 |
-| MetaMem (one-shot) | 0.461 | **0.750** | **0.808** | **0.964** |
-| MetaMem (iterative) | **0.570** | **0.800** | **0.808** | **0.964** |
+| Mem-Engram (one-shot) | 0.461 | **0.750** | **0.808** | **0.964** |
+| Mem-Engram (iterative) | **0.570** | **0.800** | **0.808** | **0.964** |
 
-**Comparison questions** ("Were X and Y from the same country?") require surfacing facts about two entities simultaneously. MetaMem's RRF fusion retrieves both supporting paragraphs in a single pass — a 0.49 F1 advantage over SimpleMem (0.808 vs 0.316). SimpleMem's sequential query planning retrieves one entity at a time, and the answer generation step loses coherence assembling the pieces.
+**Comparison questions** ("Were X and Y from the same country?") require surfacing facts about two entities simultaneously. Mem-Engram's RRF fusion retrieves both supporting paragraphs in a single pass — a 0.49 F1 advantage over SimpleMem (0.808 vs 0.316). SimpleMem's sequential query planning retrieves one entity at a time, and the answer generation step loses coherence assembling the pieces.
 
-**Bridge questions** ("What film was produced by the director of X?") require chaining two facts: identify the director of X, then find their other film. SimpleMem's planning + reflection is well-suited for this and outperforms MetaMem one-shot by +0.14 F1. However, MetaMem iterative closes this gap to −0.028 F1 (0.570 vs 0.598) using a single coverage-check call — at a fraction of SimpleMem's latency.
+**Bridge questions** ("What film was produced by the director of X?") require chaining two facts: identify the director of X, then find their other film. SimpleMem's planning + reflection is well-suited for this and outperforms Mem-Engram one-shot by +0.14 F1. However, Mem-Engram iterative closes this gap to −0.028 F1 (0.570 vs 0.598) using a single coverage-check call — at a fraction of SimpleMem's latency.
 
 ### 4.5 Ablation: Evolution Trajectory
 
-Table 3 shows MetaMem's performance across three evolution rounds on the same 50 examples, starting from a weak keyword-only configuration.
+Table 3 shows Mem-Engram's performance across three evolution rounds on the same 50 examples, starting from a weak keyword-only configuration.
 
-**Table 3: MetaMem evolution trajectory (n=50, 3 rounds)**
+**Table 3: Mem-Engram evolution trajectory (n=50, 3 rounds)**
 
 | Round | Config | Answer F1 | Retrieval Recall | LLM Diagnosis |
 |---|---|---|---|---|
@@ -258,7 +258,7 @@ The 0.6 average additional LLM calls indicates that roughly 60% of bridge questi
 
 SimpleMem's planning phase decomposes a comparison question ("Were X and Y of the same nationality?") into sub-queries ("X nationality" and "Y nationality"), executes them in parallel, and reassembles in the answer generation prompt. This works well for bridge questions where the chain is sequential — but for comparison questions, the two sub-queries are *semantically independent*. Parallel sub-queries to a dense retrieval store frequently return different passage rankings, and the answer generation LLM must reconcile them under a limited context window.
 
-MetaMem's RRF fusion submits the full original query ("Were X and Y of the same nationality?") against all 10 stored paragraphs simultaneously. Because both paragraphs about X and Y use nationality-related language, both score highly in a single semantic pass. The answer generation LLM receives both in a single coherent context.
+Mem-Engram's RRF fusion submits the full original query ("Were X and Y of the same nationality?") against all 10 stored paragraphs simultaneously. Because both paragraphs about X and Y use nationality-related language, both score highly in a single semantic pass. The answer generation LLM receives both in a single coherent context.
 
 This is a direct consequence of the "store raw, retrieve with LLM" principle: the raw paragraph text contains implicit semantic signals (nationality vocabulary, country names) that RRF fusion exploits without any explicit query decomposition.
 
@@ -277,12 +277,12 @@ SimpleMem's 10.06 s/query breaks down approximately as:
 - Reflection LLM call: ~2–3 s
 - Answer LLM call: ~2–3 s
 
-MetaMem's 0.87 s/query:
+Mem-Engram's 0.87 s/query:
 - MiniLM embedding (384-dim): ~0.05 s
 - Retrieval (RRF fusion): ~0.02 s
 - Answer LLM call: ~0.8 s
 
-The 11.6× speedup is not primarily from the lighter embedding model (384 vs 1024 dim) but from eliminating 3 of the 5 LLM call stages. MetaMem iterative adds ~0.6 s for the coverage-check call on bridge questions, preserving a ~6× speed advantage.
+The 11.6× speedup is not primarily from the lighter embedding model (384 vs 1024 dim) but from eliminating 3 of the 5 LLM call stages. Mem-Engram iterative adds ~0.6 s for the coverage-check call on bridge questions, preserving a ~6× speed advantage.
 
 ### 5.4 Design Principle Validation
 
@@ -299,7 +299,7 @@ Our results quantify the value of each design principle:
 
 ## 6. Claude Code Integration: Session Continuity
 
-Beyond the benchmark evaluation, MetaMem's primary use case is reducing re-exploration overhead in Claude Code sessions. We describe the end-to-end flow and preliminary observations.
+Beyond the benchmark evaluation, Mem-Engram's primary use case is reducing re-exploration overhead in Claude Code sessions. We describe the end-to-end flow and preliminary observations.
 
 ### 6.1 Session Lifecycle
 
@@ -323,7 +323,7 @@ The `memory_hits.jsonl` ledger records per-session statistics:
  "memory_hits": 3, "memories_distilled": 2}
 ```
 
-The MetaMem dashboard (`metamem dashboard`) visualises this over time, giving a signal for whether the memory system is accumulating useful knowledge and being retrieved.
+The Mem-Engram dashboard (`metamem dashboard`) visualises this over time, giving a signal for whether the memory system is accumulating useful knowledge and being retrieved.
 
 ---
 
@@ -339,17 +339,17 @@ The `_distill_to_store()` prompt is currently static. The `memory_hits` ledger r
 
 ### 7.3 Better Embedders
 
-All experiments use all-MiniLM-L6-v2 (384-dim). EvolveMem's default of BAAI/bge-base-en-v1.5 (768-dim) should improve retrieval recall by ~5–10% based on BEIR benchmarks, particularly for dense long-document retrieval. SimpleMem's Qwen3-Embedding-0.6B (1024-dim) already demonstrates this: its recall is competitive with MetaMem's despite using sequential query planning.
+All experiments use all-MiniLM-L6-v2 (384-dim). EvolveMem's default of BAAI/bge-base-en-v1.5 (768-dim) should improve retrieval recall by ~5–10% based on BEIR benchmarks, particularly for dense long-document retrieval. SimpleMem's Qwen3-Embedding-0.6B (1024-dim) already demonstrates this: its recall is competitive with Mem-Engram's despite using sequential query planning.
 
 ### 7.4 Latent-Space Memory
 
-The current storage backend (text → SQLite + numpy embeddings) is a stepping stone. The long-term direction is *KV-cache storage*: saving the transformer's key-value attention states after processing a memory context, and injecting them directly into future sessions at the activation level. This eliminates the encode-at-retrieval-time cost entirely — a context of 100k tokens can be "memorised" as a compact KV blob and re-injected in milliseconds. MetaMem's `MemoryStore` and retrieval interfaces are designed to be backend-agnostic; switching from text to activation storage requires no API changes for callers.
+The current storage backend (text → SQLite + numpy embeddings) is a stepping stone. The long-term direction is *KV-cache storage*: saving the transformer's key-value attention states after processing a memory context, and injecting them directly into future sessions at the activation level. This eliminates the encode-at-retrieval-time cost entirely — a context of 100k tokens can be "memorised" as a compact KV blob and re-injected in milliseconds. Mem-Engram's `MemoryStore` and retrieval interfaces are designed to be backend-agnostic; switching from text to activation storage requires no API changes for callers.
 
 ---
 
 ## 8. Conclusion
 
-We presented MetaMem, a self-evolving typed memory system for LLM agents. Our central claim — that raw storage with LLM-time understanding outperforms pre-structured indexing — is supported by a 7.7× F1 improvement when switching from keyword-only to dense retrieval, and a 0.49 F1 advantage over SimpleMem's query-planning approach on comparison questions. The iterative retrieval engine closes the multi-hop gap with a single lightweight LLM call, achieving 0.570 F1 on bridge questions vs SimpleMem's 0.598 while being 6× faster. MetaMem ships as a Claude Code MCP server with deterministic lifecycle hooks, making memory capture automatic and session continuity seamless for everyday LLM-assisted development workflows.
+We presented Mem-Engram, a self-evolving typed memory system for LLM agents. Our central claim — that raw storage with LLM-time understanding outperforms pre-structured indexing — is supported by a 7.7× F1 improvement when switching from keyword-only to dense retrieval, and a 0.49 F1 advantage over SimpleMem's query-planning approach on comparison questions. The iterative retrieval engine closes the multi-hop gap with a single lightweight LLM call, achieving 0.570 F1 on bridge questions vs SimpleMem's 0.598 while being 6× faster. Mem-Engram ships as a Claude Code MCP server with deterministic lifecycle hooks, making memory capture automatic and session continuity seamless for everyday LLM-assisted development workflows.
 
 ---
 

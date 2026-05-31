@@ -1,4 +1,4 @@
-# 🧠 MetaMem
+# 🧠 Mem-Engram
 
 **Unified lifelong memory for LLM agents** — typed stores, evolution from task results, MCP integration for Claude Code.
 
@@ -7,9 +7,9 @@
 
 ---
 
-## What is MetaMem?
+## What is Mem-Engram?
 
-MetaMem is a memory system that **gets smarter over time**. Unlike simple memory stores that just record observations, MetaMem:
+Mem-Engram is a memory system that **gets smarter over time**. Unlike simple memory stores that just record observations, Mem-Engram:
 
 1. **Types memories** — separates facts, skills, failures, preferences, and events into specialized stores with different retrieval behaviors
 2. **Evolves from results** — when a recalled memory helps you succeed, its confidence increases; when it misleads, it gets corrected or deprecated
@@ -29,20 +29,20 @@ pip install -e .
 ### Register with Claude Code
 
 ```bash
-metamem install
+mem-engram install
 ```
 
-This registers MetaMem as an MCP server using Claude Code's native CLI
-(`claude mcp add metamem --scope user -- <python> -m metamem.mcp_server`). If the
+This registers Mem-Engram as an MCP server using Claude Code's native CLI
+(`claude mcp add mem-engram --scope user -- <python> -m mem_engram.mcp_server`). If the
 `claude` CLI isn't on your PATH, it falls back to writing `~/.claude/.mcp.json` and
-`~/.claude/claude_desktop_config.json` directly. It also injects MetaMem instructions
+`~/.claude/claude_desktop_config.json` directly. It also injects Mem-Engram instructions
 into your project's `CLAUDE.md`.
 
 Install variants:
 
 ```bash
-metamem install --project-only        # register only for the current project (scope: project)
-metamem install --project-dir /path   # write CLAUDE.md to a specific directory
+mem-engram install --project-only        # register only for the current project (scope: project)
+mem-engram install --project-dir /path   # write CLAUDE.md to a specific directory
 ```
 
 Then verify and approve in Claude Code:
@@ -51,16 +51,16 @@ Then verify and approve in Claude Code:
 claude mcp list
 ```
 
-If MetaMem shows **"Pending approval"**, launch `claude` and approve it. Restart Claude Code to activate.
+If Mem-Engram shows **"Pending approval"**, launch `claude` and approve it. Restart Claude Code to activate.
 
 ### Automatic capture (hooks)
 
-By default, `metamem install` also registers **Claude Code lifecycle hooks** into
+By default, `mem-engram install` also registers **Claude Code lifecycle hooks** into
 `~/.claude/settings.json` (or `.claude/settings.json` with `--project-only`). Unlike
 the `CLAUDE.md` instructions — which the model may skip — hooks fire **deterministically**
 at each lifecycle event, so memory capture happens whether or not the model "remembers":
 
-| Event | What MetaMem does |
+| Event | What Mem-Engram does |
 |-------|-------------------|
 | `SessionStart` | Injects prior project context into the conversation |
 | `UserPromptSubmit` | Searches memory for the prompt and injects relevant hits |
@@ -70,39 +70,39 @@ at each lifecycle event, so memory capture happens whether or not the model "rem
 Skip hooks (MCP tools only) with:
 
 ```bash
-metamem install --no-hooks
+mem-engram install --no-hooks
 ```
 
 ### Use from CLI
 
 ```bash
 # Store a memory
-metamem store "Docker rate limit is 100 pulls/6h for anonymous users" -t semantic
+mem-engram store "Docker rate limit is 100 pulls/6h for anonymous users" -t semantic
 
 # Save a preference
-metamem instruct "Always use poetry, never pip install directly"
+mem-engram instruct "Always use poetry, never pip install directly"
 
 # Search
-metamem search "docker rate limit"
+mem-engram search "docker rate limit"
 
 # View stats
-metamem stats
+mem-engram stats
 
 # View token usage tracked from Claude Code sessions
-metamem usage
+mem-engram usage
 
 # Launch the local dashboard (memories + token usage)
-metamem dashboard            # → http://127.0.0.1:8765
+mem-engram dashboard            # → http://127.0.0.1:8765
 ```
 
 ### Dashboard
 
-`metamem dashboard` launches a local, read-only web UI (FastAPI, no build step,
+`mem-engram dashboard` launches a local, read-only web UI (FastAPI, no build step,
 binds to `127.0.0.1` only) to browse:
 
 - **Memories** — by type, summary, and confidence, filterable per project
 - **Token usage** — totals, cache-hit ratio, and per-project breakdown, sourced
-  from the separate usage ledger at `~/.metamem/usage/token_usage.jsonl`
+  from the separate usage ledger at `~/.mem-engram/usage/token_usage.jsonl`
 
 Token usage is captured automatically by the `Stop` hook (from each turn's
 `message.usage`) and stored separately from the memory store, so it's easy to
@@ -114,7 +114,7 @@ analyze cost/benefit over time.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                      MetaMem                            │
+│                      Mem-Engram                            │
 ├─────────────────────────────────────────────────────────┤
 │                                                         │
 │  ┌─────────────────────────────────────────────┐        │
@@ -185,7 +185,7 @@ When you use `mem_feedback` after a task:
 - **Partial** → caveats added to procedural memories
 - **Contradiction** → old memory superseded by corrected version
 
-## Benchmark: MetaMem vs SimpleMem
+## Benchmark: Mem-Engram vs SimpleMem
 
 Head-to-head evaluation on **HotpotQA** (distractor split) — a public multi-hop QA
 benchmark. Each question has 10 paragraphs (2 supporting + 8 distractors). The task:
@@ -195,7 +195,7 @@ Same LLM (`claude-haiku-4-5-20251001`), same 50 questions, measured independentl
 
 ### Overall results
 
-| Metric | MetaMem | SimpleMem | Δ |
+| Metric | Mem-Engram | SimpleMem | Δ |
 |---|---|---|---|
 | **Answer F1** | **0.558** | 0.519 | **+0.039** |
 | **Retrieval Recall** | **0.810** | 0.780 | **+0.030** |
@@ -203,28 +203,28 @@ Same LLM (`claude-haiku-4-5-20251001`), same 50 questions, measured independentl
 
 ### By question type
 
-| Type | MetaMem F1 | SimpleMem F1 | Winner |
+| Type | Mem-Engram F1 | SimpleMem F1 | Winner |
 |---|---|---|---|
-| **Comparison** | **0.808** | 0.316 | MetaMem **+0.49** |
+| **Comparison** | **0.808** | 0.316 | Mem-Engram **+0.49** |
 | Bridge | 0.461 | **0.598** | SimpleMem +0.14 |
 
 ### What the numbers mean
 
 **Comparison questions** (two-entity lookup, e.g. "Were X and Y from the same country?"):
-MetaMem's RRF fusion surfaces both entity paragraphs simultaneously. SimpleMem's
+Mem-Engram's RRF fusion surfaces both entity paragraphs simultaneously. SimpleMem's
 sequential planning generates sub-queries one at a time and loses coherence reassembling
 the answer — a 0.49 F1 deficit.
 
 **Bridge questions** (chain A → B, e.g. "Who directed the film produced by X?"):
 SimpleMem's multi-query planning + reflection is purpose-built for this: retrieve fact A,
-identify the missing link, retrieve fact B. MetaMem's one-shot retrieval often gets only
+identify the missing link, retrieve fact B. Mem-Engram's one-shot retrieval often gets only
 one of the two supporting paragraphs — a 0.14 F1 gap that iterative retrieval closes
 (see [Design principles](#design-principles)).
 
-**Speed**: MetaMem is 11.6× faster because SimpleMem's planning + reflection adds
-3 LLM calls per question before the answer call. MetaMem retrieves once and answers.
+**Speed**: Mem-Engram is 11.6× faster because SimpleMem's planning + reflection adds
+3 LLM calls per question before the answer call. Mem-Engram retrieves once and answers.
 
-### Evolution trajectory (MetaMem, 3 rounds, weak → optimised)
+### Evolution trajectory (Mem-Engram, 3 rounds, weak → optimised)
 
 | Round | Config | F1 | Recall |
 |---|---|---|---|
@@ -268,7 +268,7 @@ ruff check metamem/
 
 ## Configuration
 
-Settings in `~/.metamem/settings.json` (auto-created):
+Settings in `~/.mem-engram/settings.json` (auto-created):
 
 ```json
 {
@@ -290,7 +290,7 @@ Settings in `~/.metamem/settings.json` (auto-created):
 
 ## Design Principles
 
-These principles drive every architectural decision in MetaMem:
+These principles drive every architectural decision in Mem-Engram:
 
 **1. Store raw, retrieve raw.**
 Pre-classifying, pre-summarising, or building knowledge graphs at write time is an
@@ -306,7 +306,7 @@ and FTS are acceleration indexes only, never the source of truth.
 **3. Iterative retrieval for multi-hop.**
 For questions that chain two facts together, one retrieval pass is not enough. The right
 architecture retrieves once, identifies what's missing, generates a targeted follow-up
-query, and retrieves again. This is the bridge between MetaMem's comparison strength
+query, and retrieves again. This is the bridge between Mem-Engram's comparison strength
 and SimpleMem's bridge-question strength.
 
 **4. Evolution from signal, not from schedule.**
@@ -322,7 +322,7 @@ backends.
 
 ## Comparison with Claude-Mem
 
-| | Claude-Mem | MetaMem |
+| | Claude-Mem | Mem-Engram |
 |-|-----------|---------|
 | **Metaphor** | 📹 Recording | 🧠 Learning brain |
 | **Memory model** | Flat observations | 5 typed stores |

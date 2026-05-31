@@ -3,16 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "metamem"
-version = "0.1.0"
-description = "Unified lifelong memory for LLM agents — typed stores, evolution from task results, MCP integration"
+name = "mem-engram"
+version = "0.2.0"
+description = "Mem-Engram: self-evolving typed memory system for LLM agents — typed stores, iterative retrieval, MCP integration"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [
     {name = "SimpleMem Team"},
 ]
-keywords = ["llm", "memory", "agent", "mcp", "evolution"]
+keywords = ["llm", "memory", "agent", "mcp", "evolution", "engram", "retrieval"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -46,16 +46,16 @@ dev = [
 ]
 
 [project.scripts]
-metamem = "metamem.cli:main"
+mem-engram = "mem_engram.cli:main"
 
 [project.entry-points."mcp.servers"]
-metamem = "metamem.mcp_server:serve"
+mem-engram = "mem_engram.mcp_server:serve"
 
 [tool.hatch.build.targets.wheel]
-packages = ["metamem"]
+packages = ["mem_engram"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"metamem/assets" = "metamem/assets"
+"mem_engram/assets" = "mem_engram/assets"
 
 [tool.ruff]
 line-length = 100

@@ -37,9 +37,9 @@ def _safe_session_id(raw: str) -> str:
 
 def _make_session(payload: dict) -> SessionManager:
     """Build a SessionManager pinned to Claude Code's session id + cwd."""
-    data_dir = os.environ.get("METAMEM_DATA_DIR", os.path.expanduser("~/.metamem"))
+    data_dir = os.environ.get("MEM_ENGRAM_DATA_DIR", os.path.expanduser("~/.mem-engram"))
     cwd = payload.get("cwd") or os.getcwd()
-    project = os.environ.get("METAMEM_PROJECT", "") or detect_project(cwd)
+    project = os.environ.get("MEM_ENGRAM_PROJECT", "") or detect_project(cwd)
     session_id = _safe_session_id(str(payload.get("session_id", "")))
     return SessionManager.start(
         project=project,
@@ -238,7 +238,7 @@ def handle_stop(payload: dict) -> dict:
         from . import usage as _usage
         token_usage = _usage.extract_usage(lines)
         if token_usage:
-            data_dir = os.environ.get("METAMEM_DATA_DIR", os.path.expanduser("~/.metamem"))
+            data_dir = os.environ.get("MEM_ENGRAM_DATA_DIR", os.path.expanduser("~/.mem-engram"))
             record = _usage.build_record(sm.session_id, sm.config.project, token_usage)
             _usage.record_usage(data_dir, record)
             msg += f" | tokens in={token_usage['input_tokens']} out={token_usage['output_tokens']}"
@@ -258,7 +258,7 @@ def handle_session_end(payload: dict) -> dict:
     # Write memory hit stats to the ledger for dashboard aggregation
     try:
         from . import usage as _usage
-        data_dir = os.environ.get("METAMEM_DATA_DIR", os.path.expanduser("~/.metamem"))
+        data_dir = os.environ.get("MEM_ENGRAM_DATA_DIR", os.path.expanduser("~/.mem-engram"))
         _usage.record_memory_hits(data_dir, {
             "ts": time.time(),
             "session_id": sm.session_id,

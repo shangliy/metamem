@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from metamem.models import (
+from mem_engram.models import (
     EpisodicMemory,
     EvolutionAction,
     FailureMemory,
@@ -17,15 +17,15 @@ from metamem.models import (
     TaskExecution,
     TaskResult,
 )
-from metamem.store import MemoryStore
-from metamem.retriever import (
+from mem_engram.store import MemoryStore
+from mem_engram.retriever import (
     RetrievalConfig,
     RetrievalEngine,
     classify_intent,
     QueryIntent,
 )
-from metamem.evolution import EvolutionConfig, EvolutionEngine
-from metamem.extractor import MemoryExtractor
+from mem_engram.evolution import EvolutionConfig, EvolutionEngine
+from mem_engram.extractor import MemoryExtractor
 
 
 # ── Models ──

@@ -5,7 +5,7 @@ Uses FastAPI's TestClient — no live server needed.
 
 import pytest
 
-from metamem import dashboard, usage
+from mem_engram import dashboard, usage
 
 pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient  # noqa: E402
@@ -57,14 +57,14 @@ def test_collect_memories_no_projects(tmp_path):
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("METAMEM_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("MEM_ENGRAM_DATA_DIR", str(tmp_path))
     return TestClient(dashboard.create_app())
 
 
 def test_index_serves_html(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert "MetaMem" in r.text
+    assert "Mem-Engram" in r.text
     assert "<html" in r.text.lower()
 
 

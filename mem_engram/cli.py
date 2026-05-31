@@ -82,7 +82,7 @@ def _safe_load_json(path: Path) -> dict:
 def _verify_server_starts() -> bool:
     """Quick sanity check that the MCP server module can be imported."""
     result = subprocess.run(
-        [sys.executable, "-c", "from metamem.mcp_server import serve; print('OK')"],
+        [sys.executable, "-c", "from mem_engram.mcp_server import serve; print('OK')"],
         capture_output=True, text=True, timeout=30,
     )
     return result.returncode == 0 and "OK" in result.stdout
@@ -101,16 +101,16 @@ def _register_with_claude_cli(scope: str, data_dir: str) -> bool:
 
     # Remove any stale entry first so re-running install is idempotent.
     subprocess.run(
-        [claude_bin, "mcp", "remove", "--scope", scope, "metamem"],
+        [claude_bin, "mcp", "remove", "--scope", scope, "mem-engram"],
         capture_output=True, text=True,
     )
 
     # claude mcp add <name> -e KEY=val --scope <scope> -- <command> [args...]
     cmd = [
-        claude_bin, "mcp", "add", "metamem",
-        "-e", f"METAMEM_DATA_DIR={data_dir}",
+        claude_bin, "mcp", "add", "mem-engram",
+        "-e", f"MEM_ENGRAM_DATA_DIR={data_dir}",
         "--scope", scope,
-        "--", sys.executable, "-m", "metamem.mcp_server",
+        "--", sys.executable, "-m", "mem_engram.mcp_server",
     ]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode == 0:
@@ -136,7 +136,7 @@ def _register_hooks(settings_path: Path, data_dir: str) -> None:
     hooks = settings.setdefault("hooks", {})
 
     for event, (sub, timeout) in events.items():
-        command = f"{sys.executable} -m metamem hook {sub}"
+        command = f"{sys.executable} -m mem_engram hook {sub}"
         entry = {"hooks": [{"type": "command", "command": command, "timeout": timeout}]}
 
         existing = hooks.get(event)
@@ -162,7 +162,7 @@ def _is_metamem_hook_group(group: dict) -> bool:
     if not isinstance(group, dict):
         return False
     for h in group.get("hooks", []):
-        if isinstance(h, dict) and "metamem hook" in str(h.get("command", "")):
+        if isinstance(h, dict) and "mem_engram hook" in str(h.get("command", "")):
             return True
     return False
 
@@ -179,12 +179,12 @@ def install(project_dir: str | None, project_only: bool, no_hooks: bool):
     By default also registers lifecycle hooks for automatic memory capture
     (use --no-hooks to skip).
     """
-    data_dir = os.path.expanduser("~/.metamem")
+    data_dir = os.path.expanduser("~/.mem-engram")
     mcp_entry = {
         "command": sys.executable,
-        "args": ["-m", "metamem.mcp_server"],
+        "args": ["-m", "mem_engram.mcp_server"],
         "env": {
-            "METAMEM_DATA_DIR": data_dir,
+            "MEM_ENGRAM_DATA_DIR": data_dir,
         },
     }
 
@@ -204,7 +204,7 @@ def install(project_dir: str | None, project_only: bool, no_hooks: bool):
 
             if "mcpServers" not in global_config:
                 global_config["mcpServers"] = {}
-            global_config["mcpServers"]["metamem"] = mcp_entry
+            global_config["mcpServers"]["mem-engram"] = mcp_entry
             with open(global_mcp, "w") as f:
                 json.dump(global_config, f, indent=2)
 
@@ -216,7 +216,7 @@ def install(project_dir: str | None, project_only: bool, no_hooks: bool):
             desktop_config = _safe_load_json(desktop_config_file)
             if "mcpServers" not in desktop_config:
                 desktop_config["mcpServers"] = {}
-            desktop_config["mcpServers"]["metamem"] = mcp_entry
+            desktop_config["mcpServers"]["mem-engram"] = mcp_entry
             with open(desktop_config_file, "w") as f:
                 json.dump(desktop_config, f, indent=2)
 
@@ -230,7 +230,7 @@ def install(project_dir: str | None, project_only: bool, no_hooks: bool):
             proj_config = _safe_load_json(mcp_json_path)
             if "mcpServers" not in proj_config:
                 proj_config["mcpServers"] = {}
-            proj_config["mcpServers"]["metamem"] = mcp_entry
+            proj_config["mcpServers"]["mem-engram"] = mcp_entry
             with open(mcp_json_path, "w") as f:
                 json.dump(proj_config, f, indent=2)
             click.echo(f"✓ MCP server registered in {mcp_json_path}")
@@ -281,7 +281,7 @@ def install(project_dir: str | None, project_only: bool, no_hooks: bool):
         click.echo("  ✓ MCP server verified — starts successfully")
     else:
         click.echo("  ⚠ MCP server failed to start. Try running:")
-        click.echo(f"    {sys.executable} -m metamem.mcp_server")
+        click.echo(f"    {sys.executable} -m mem_engram.mcp_server")
         click.echo("  to see the error details.")
         return
 
@@ -418,7 +418,7 @@ def hook_session_end():
 def usage():
     """Show token usage tracked from Claude Code sessions."""
     from . import usage as _usage
-    data_dir = os.environ.get("METAMEM_DATA_DIR", os.path.expanduser("~/.metamem"))
+    data_dir = os.environ.get("MEM_ENGRAM_DATA_DIR", os.path.expanduser("~/.mem-engram"))
     records = _usage.load_usage(data_dir)
     if not records:
         click.echo("No token usage recorded yet.")

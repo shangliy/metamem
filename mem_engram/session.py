@@ -7,7 +7,7 @@ When you open a new Claude session in a project folder:
 4. At session end, absorbs important memories into the project store
 
 Folder layout:
-    ~/.metamem/
+    ~/.mem-engram/
     ├── projects/
     │   ├── my-web-app/              # One folder per project
     │   │   ├── project_memory.db    # Project-scoped persistent memory
@@ -48,7 +48,7 @@ from .store import MemoryStore
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DATA_DIR = os.path.expanduser("~/.metamem")
+DEFAULT_DATA_DIR = os.path.expanduser("~/.mem-engram")
 
 
 def detect_project(cwd: str | None = None) -> str:

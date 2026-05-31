@@ -1,6 +1,6 @@
 """Tests for token usage tracking (metamem/usage.py)."""
 
-from metamem import usage
+from mem_engram import usage
 
 
 def _assistant_with_usage(in_t, out_t, cache_read=0, cache_create=0):

@@ -359,7 +359,7 @@ def run_hotpotqa(
             confidence_boost_weight=0.2, enable_result_feedback=False,
         )
 
-    tmp_root = tempfile.mkdtemp(prefix="metamem_hpqa_")
+    tmp_root = tempfile.mkdtemp(prefix="mem_engram_hpqa_")
     run_id = time.strftime(f"hotpotqa_{initial}_%Y%m%d_%H%M%S")
     results_dir = f"benchmark_results/hotpotqa/{run_id}"
     os.makedirs(results_dir, exist_ok=True)

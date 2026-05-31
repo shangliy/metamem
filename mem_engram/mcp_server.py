@@ -43,10 +43,10 @@ def _init():
     if _store is not None:
         return
 
-    data_dir = os.environ.get("METAMEM_DATA_DIR", os.path.expanduser("~/.metamem"))
+    data_dir = os.environ.get("MEM_ENGRAM_DATA_DIR", os.path.expanduser("~/.mem-engram"))
 
     # Detect project and use project-scoped store
-    project = os.environ.get("METAMEM_PROJECT", "")
+    project = os.environ.get("MEM_ENGRAM_PROJECT", "")
     cwd = os.environ.get("METAMEM_CWD", os.getcwd())
     if not project:
         project = detect_project(cwd)

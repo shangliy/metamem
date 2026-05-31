@@ -1,5 +1,5 @@
 
-## Memory (MetaMem)
+## Memory (Mem-Engram)
 
 You have persistent project memory via MCP tools. **These are mandatory behaviors, not optional.**
 

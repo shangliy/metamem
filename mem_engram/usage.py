@@ -5,7 +5,7 @@ Stop hook already parses the transcript to capture turns, so we extract usage in
 the same pass and append it to a dedicated JSONL ledger — kept OUT of the memory
 store so the memory DB stays clean and the usage data is easy to analyze later.
 
-Ledger location: ``<data_dir>/usage/token_usage.jsonl`` (default ``~/.metamem``).
+Ledger location: ``<data_dir>/usage/token_usage.jsonl`` (default ``~/.mem-engram``).
 One JSON object per captured turn.
 """
 

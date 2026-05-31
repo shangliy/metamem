@@ -17,7 +17,7 @@ _ASSETS_DIR = Path(__file__).parent / "assets"
 
 
 def _data_dir() -> str:
-    return os.environ.get("METAMEM_DATA_DIR", os.path.expanduser("~/.metamem"))
+    return os.environ.get("MEM_ENGRAM_DATA_DIR", os.path.expanduser("~/.mem-engram"))
 
 
 def list_projects(data_dir: str) -> list[str]:

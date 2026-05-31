@@ -6,7 +6,7 @@ evolution from task results and MCP integration for Claude Code.
 
 __version__ = "0.1.0"
 
-from metamem.models import (
+from mem_engram.models import (
     MemoryType,
     MemoryUnit,
     EpisodicMemory,
@@ -18,10 +18,10 @@ from metamem.models import (
     TaskResult,
     EvolutionAction,
 )
-from metamem.store import MemoryStore
-from metamem.retriever import RetrievalEngine, RetrievalConfig
-from metamem.evolution import EvolutionEngine
-from metamem.session import SessionManager, detect_project
+from mem_engram.store import MemoryStore
+from mem_engram.retriever import RetrievalEngine, RetrievalConfig
+from mem_engram.evolution import EvolutionEngine
+from mem_engram.session import SessionManager, detect_project
 
 __all__ = [
     "MemoryType",
